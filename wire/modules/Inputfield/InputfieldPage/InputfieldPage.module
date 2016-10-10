@@ -225,8 +225,15 @@ class InputfieldPage extends Inputfield implements ConfigurableModule {
 			$selector = $findPagesSelector; 
 			if($editPage) $selector = self::getFindPagesSelector($editPage, $selector); 
 			if(!$page->matches($selector)) {
-				if($editPage) $editPage->set('_isValidPage', "Page $page does not match findPagesSelector: $selector"); 
-				$valid = false;
+				// failed in-memory check, attempt $page->count() check...
+				$selector .= ", id=$page->id";
+				if($page->wire('pages')->count($selector)) {
+					// looks like its okay
+				} else {
+					// also fails $pages->cont() check, so definitely not valid
+					if($editPage) $editPage->set('_isValidPage', "Page $page does not match findPagesSelector: $selector");
+					$valid = false;
+				}
 			}
 		} 
 	
@@ -358,7 +365,7 @@ class InputfieldPage extends Inputfield implements ConfigurableModule {
 				$value = null;
 				if($form && (!$subfield || $subfield == 'id')) {
 					// attempt to get value from the form, to account for ajax changes that would not yet be reflected on the page
-					$in = $form->get($field); 
+					$in = $form->getChildByName($field); 
 					if($in) $value = $in->attr('value');
 				}
 				if(is_null($value)) $value = $page->get($field); 
@@ -367,6 +374,7 @@ class InputfieldPage extends Inputfield implements ConfigurableModule {
 				$selector = str_replace($tag, "=$value", $selector); 
 			}
 		}
+		
 		return $selector; 
 	}
 
@@ -462,7 +470,10 @@ class InputfieldPage extends Inputfield implements ConfigurableModule {
 			}
 			
 			if($template_id) $inputfield->template_id = $template_id; 
-			if($findPagesSelector) $inputfield->findPagesSelector = $findPagesSelector; 
+			
+			if($findPagesSelector) {
+				$inputfield->findPagesSelector = self::getFindPagesSelector($page, $findPagesSelector); 
+			}
 			
 			if(strlen($labelFieldFormat) && $labelFieldName === '.') {
 				$inputfield->labelFieldName = $labelFieldFormat;
