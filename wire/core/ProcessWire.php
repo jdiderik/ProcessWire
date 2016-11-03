@@ -28,7 +28,7 @@ class ProcessWire extends Wire {
 
 	const versionMajor = 3; 
 	const versionMinor = 0; 
-	const versionRevision = 36; 
+	const versionRevision = 39; 
 	const versionSuffix = '';
 	
 	const indexVersion = 300; // required version for index.php file (represented by PROCESSWIRE define)
@@ -147,10 +147,21 @@ class ProcessWire extends Wire {
 		$this->shutdown = $this->wire(new WireShutdown());
 		$this->config($config);
 		$this->load($config);
+		
+		if($this->getNumInstances() > 1) {
+			// this instance is not handling the request and needs a mock $page API var and pageview
+			/** @var ProcessPageView $view */
+			$view = $this->wire('modules')->get('ProcessPageView');
+			$view->execute(false);
+		}
 	}
 
 	public function __toString() {
-		return $this->className() . " " . self::versionMajor . "." . self::versionMinor . "." . self::versionRevision; 
+		$str = $this->className() . " ";
+		$str .= self::versionMajor . "." . self::versionMinor . "." . self::versionRevision; 
+		if(self::versionSuffix) $str .= " " . self::versionSuffix;
+		if($this->getNumInstances() > 1) $str .= " #$this->instanceID";
+		return $str;
 	}
 
 	/**
@@ -207,6 +218,10 @@ class ProcessWire extends Wire {
 			$process = $this->wire('process');
 			if($process == 'ProcessPageView') $process->finished();
 		});
+		
+		if($config->useFunctionsAPI) {
+			include($config->paths->core . 'FunctionsAPI.php');
+		}
 
 		$this->setStatus(self::statusBoot);
 	}
@@ -430,9 +445,11 @@ class ProcessWire extends Wire {
 		$config = $this->wire('config');
 		$session = $this->wire('session');
 		$cache = $this->wire('cache'); 
+		$profiler = $this->wire('profiler');
 		
 		if($session) $session->maintenance();
 		if($cache) $cache->maintenance();
+		if($profiler) $profiler->maintenance();
 
 		if($config->templateCompile) {
 			$compiler = new FileCompiler($this->wire('config')->paths->templates);
@@ -443,6 +460,7 @@ class ProcessWire extends Wire {
 			$compiler = new FileCompiler($this->wire('config')->paths->siteModules);
 			$compiler->maintenance();
 		}
+		
 	}
 
 	/**
@@ -551,6 +569,16 @@ class ProcessWire extends Wire {
 	 */
 	public static function getInstances() {
 		return self::$instances;
+	}
+
+	/**
+	 * Return number of instances
+	 * 
+	 * @return int
+	 * 
+	 */
+	public static function getNumInstances() {
+		return count(self::$instances);
 	}
 
 	/**

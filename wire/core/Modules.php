@@ -65,7 +65,13 @@ class Modules extends WireArray {
 	 * When combined with flagsAutoload, indicates that the module's autoload state is temporarily disabled
 	 * 
 	 */
-	const flagsDisabled = 16; 
+	const flagsDisabled = 16;
+
+	/**
+	 * Indicates module that maintains a configurable interface but with no interactive Inputfields
+	 * 
+	 */
+	const flagsNoUserConfig = 32;
 
 	/**
 	 * Filename for module info cache file
@@ -497,6 +503,22 @@ class Modules extends WireArray {
 			// attempt 2.x module in dedicated namespace or root namespace
 			$className = $this->getModuleNamespace($moduleName) . $moduleName;
 		}
+
+		if(ProcessWire::getNumInstances() > 1) {
+			// in a multi-instance environment, ensures that anything happening during
+			// the module __construct is using the right instance. necessary because the
+			// construct method runs before the wire instance is set to the module
+			$wire1 = ProcessWire::getCurrentInstance();
+			$wire2 = $this->wire();
+			if($wire1 !== $wire2) {
+				ProcessWire::setCurrentInstance($wire2);
+			} else {
+				$wire1 = null;
+			}
+		} else {
+			$wire1 = null;
+			$wire2 = null;
+		}
 		
 		try {
 			$module = $this->wire(new $className());
@@ -505,6 +527,7 @@ class Modules extends WireArray {
 			$module = null;
 		}
 		if($this->debug) $this->debugTimerStop($debugKey);
+		if($wire1) ProcessWire::setCurrentInstance($wire1);
 		return $module; 
 	}
 
@@ -647,8 +670,11 @@ class Modules extends WireArray {
 				$module = $this->newModule($className);
 				if($module) {
 					$this->set($className, $module);
-					$this->initModule($module);
-					if($this->debug) $this->message("Conditional autoload: $className LOADED");
+					if($this->initModule($module)) {
+						if($this->debug) $this->message("Conditional autoload: $className LOADED");
+					} else {
+						if($this->debug) $this->warning("Failed conditional autoload: $className");
+					}
 				}
 
 			} else {
@@ -1205,7 +1231,9 @@ class Modules extends WireArray {
 		if($module && $needsInit) {
 			// if the module is configurable, then load it's config data
 			// and set values for each before initializing the module
-			if(empty($options['noInit'])) $this->initModule($module, false);
+			if(empty($options['noInit'])) {
+				if(!$this->initModule($module, false)) $module = null;
+			}
 		}
 	
 		return $module; 
@@ -2904,34 +2932,38 @@ class Modules extends WireArray {
 	 * #pw-changelog 3.0.16 Changed from more verbose name `getModuleConfigData()`, which can still be used. 
 	 * 
 	 * @param string|Module $class
+	 * @param string $property Optionally just get value for a specific property (omit to get all config)
 	 * @return array Module configuration data
 	 * @see Modules::saveConfig()
 	 * @since 3.0.16 Use method getModuleConfigData() with same arguments for prior versions (can also be used on any version).
 	 *
 	 */
-	public function getConfig($class) {
+	public function getConfig($class, $property = '') {
 
+		$emptyReturn = $property ? null : array();
 		$className = $class;
 		if(is_object($className)) $className = wireClassName($className->className(), false);
-		if(!$id = $this->moduleIDs[$className]) return array();
-		if(!isset($this->configData[$id])) return array(); // module has no config data
-		if(is_array($this->configData[$id])) return $this->configData[$id]; 
-
-		// first verify that module doesn't have a config file
-		$configurable = $this->isConfigurable($className); 
-		if(!$configurable) return array();
+		if(!$id = $this->moduleIDs[$className]) return $emptyReturn;
+		if(!isset($this->configData[$id])) return $emptyReturn; // module has no config data
 		
-		$database = $this->wire('database'); 
-		$query = $database->prepare("SELECT data FROM modules WHERE id=:id", "modules.getConfig($className)"); // QA
-		$query->bindValue(":id", (int) $id, \PDO::PARAM_INT); 
-		$query->execute();
-		$data = $query->fetchColumn(); 
-		$query->closeCursor();
+		if(is_array($this->configData[$id])) {
+			$data = $this->configData[$id];
+		} else {
+			// first verify that module doesn't have a config file
+			$configurable = $this->isConfigurable($className);
+			if(!$configurable) return $emptyReturn;
+			$database = $this->wire('database');
+			$query = $database->prepare("SELECT data FROM modules WHERE id=:id", "modules.getConfig($className)"); // QA
+			$query->bindValue(":id", (int) $id, \PDO::PARAM_INT);
+			$query->execute();
+			$data = $query->fetchColumn();
+			$query->closeCursor();
+			if(strlen($data)) $data = wireDecodeJSON($data);
+			if(empty($data)) $data = array();
+			$this->configData[$id] = $data;
+		}
 		
-		if(empty($data)) $data = array();
-			else $data = wireDecodeJSON($data); 
-		if(empty($data)) $data = array();
-		$this->configData[$id] = $data; 
+		if($property) return isset($data[$property]) ? $data[$property] : null;
 
 		return $data; 	
 	}
@@ -3421,18 +3453,35 @@ class Modules extends WireArray {
 	 * #pw-changelog 3.0.16 Changed name from the more verbose saveModuleConfigData(), which will still work.
 	 *
 	 * @param string|Module $class Module or module name
-	 * @param array $data Associative array of configuration data
+	 * @param array|string $data Associative array of configuration data, or name of property you want to save.
+	 * @param mixed|null $value If you specified a property in previous arg, the value for the property.
 	 * @return bool True on success, false on failure
 	 * @throws WireException
 	 * @see Modules::getConfig()
 	 * @since 3.0.16 Use method saveModuleConfigData() with same arguments for prior versions (can also be used on any version).
 	 *
 	 */
-	public function ___saveConfig($class, array $data) {
+	public function ___saveConfig($class, $data, $value = null) {
 		$className = $class;
 		if(is_object($className)) $className = $className->className();
 		$moduleName = wireClassName($className, false);
 		if(!$id = $this->moduleIDs[$moduleName]) throw new WireException("Unable to find ID for Module '$moduleName'");
+		
+		if(is_string($data)) {
+			// a property and value have been provided
+			$property = $data;	
+			$data = $this->getConfig($class);
+			if(is_null($value)) {
+				// remove the property
+				unset($data[$property]);
+			} else {
+				// populate the value for the property
+				$data[$property] = $value;
+			}
+		} else {
+			// data must be an associative array of configuration data
+			if(!is_array($data)) return false;
+		}
 
 		// ensure original duplicates info is retained and validate that it is still current
 		$data = $this->duplicates()->getDuplicatesConfigData($moduleName, $data); 
@@ -3445,6 +3494,7 @@ class Modules extends WireArray {
 		$query->bindValue(":id", (int) $id, \PDO::PARAM_INT); 
 		$result = $query->execute();
 		$this->log("Saved module '$moduleName' config data");
+		
 		return $result;
 	}
 
@@ -3521,60 +3571,88 @@ class Modules extends WireArray {
 		
 		// check for file-based config
 		$file = $this->isConfigurable($moduleName, "file");
-		if(!$file || !is_string($file) || !is_file($file)) return $form;
-	
-		$config = null;
-		$ns = $this->getModuleNamespace($moduleName);
-		$configClass = $ns . $moduleName . "Config";
-		if(!class_exists($configClass)) {
-			$configFile = $this->compile($moduleName, $file, $ns);
-			if($configFile) {
-				/** @noinspection PhpIncludeInspection */
-				include_once($configFile);
-			}
-		}
-		$configModule = null;
-		
-		if(wireClassExists($configClass)) {
-			// file contains a ModuleNameConfig class
-			$configModule = $this->wire(new $configClass());
-			
+		if(!$file || !is_string($file) || !is_file($file)) {
+			// config is not file-based
 		} else {
-			if(is_null($config)) {
+			// file-based config
+			$config = null;
+			$ns = $this->getModuleNamespace($moduleName);
+			$configClass = $ns . $moduleName . "Config";
+			if(!class_exists($configClass)) {
 				$configFile = $this->compile($moduleName, $file, $ns);
-				// if(!$configFile) $configFile = $compile ? $this->wire('files')->compile($file) : $file;
 				if($configFile) {
 					/** @noinspection PhpIncludeInspection */
-					include($configFile); // in case of previous include_once 
+					include_once($configFile);
 				}
 			}
-			if(is_array($config)) {
-				// file contains a $config array
-				$configModule = $this->wire(new ModuleConfig());
-				$configModule->add($config);
+			$configModule = null;
+
+			if(wireClassExists($configClass)) {
+				// file contains a ModuleNameConfig class
+				$configModule = $this->wire(new $configClass());
+
+			} else {
+				if(is_null($config)) {
+					$configFile = $this->compile($moduleName, $file, $ns);
+					// if(!$configFile) $configFile = $compile ? $this->wire('files')->compile($file) : $file;
+					if($configFile) {
+						/** @noinspection PhpIncludeInspection */
+						include($configFile); // in case of previous include_once 
+					}
+				}
+				if(is_array($config)) {
+					// file contains a $config array
+					$configModule = $this->wire(new ModuleConfig());
+					$configModule->add($config);
+				}
 			}
-		} 
+
+			if($configModule && $configModule instanceof ModuleConfig) {
+				$defaults = $configModule->getDefaults();
+				$data = array_merge($defaults, $data);
+				$configModule->setArray($data);
+				$fields = $configModule->getInputfields();
+				if($fields instanceof InputfieldWrapper) {
+					foreach($fields as $field) {
+						$form->append($field);
+					}
+					foreach($data as $key => $value) {
+						$f = $form->getChildByName($key);
+						if(!$f) continue;
+						if($f instanceof InputfieldCheckbox && $value) {
+							$f->attr('checked', 'checked');
+						} else {
+							$f->attr('value', $value);
+						}
+					}
+				} else {
+					$this->error("$configModule.getInputfields() did not return InputfieldWrapper");
+				}
+			}
+		} // file-based config
 		
-		if($configModule && $configModule instanceof ModuleConfig) {
-			$defaults = $configModule->getDefaults();
-			$data = array_merge($defaults, $data);
-			$configModule->setArray($data);
-			$fields = $configModule->getInputfields();
-			if($fields instanceof InputfieldWrapper) {
-				foreach($fields as $field) {
-					$form->append($field);
-				}
-				foreach($data as $key => $value) {
-					$f = $form->getChildByName($key);
-					if(!$f) continue;
-					if($f instanceof InputfieldCheckbox && $value) {
-						$f->attr('checked', 'checked');
-					} else {
-						$f->attr('value', $value);
+		if($form) {
+			// determine how many visible Inputfields there are in the module configuration
+			// for assignment or removal of flagsNoUserConfig flag when applicable
+			$numVisible = 0;
+			foreach($form->getAll() as $inputfield) {
+				if($inputfield instanceof InputfieldHidden || $inputfield instanceof InputfieldWrapper) continue;
+				$numVisible++;
+			}
+			$flags = $this->getFlags($moduleName);
+			if($numVisible) {
+				if($flags & self::flagsNoUserConfig) {
+					$info = $this->getModuleInfoVerbose($moduleName);
+					if(empty($info['addFlag']) || !($info['addFlag'] & self::flagsNoUserConfig)) {
+						$this->setFlag($moduleName, self::flagsNoUserConfig, false); // remove flag
 					}
 				}
 			} else {
-				$this->error("$configModule.getInputfields() did not return InputfieldWrapper");
+				if(!($flags & self::flagsNoUserConfig)) {
+					if(empty($info['removeFlag']) || !($info['removeFlag'] & self::flagsNoUserConfig)) {
+						$this->setFlag($moduleName, self::flagsNoUserConfig, true); // add flag
+					}
+				}
 			}
 		}
 		
@@ -4298,6 +4376,23 @@ class Modules extends WireArray {
 			if($flags & self::flagsSingular) $this->setFlag($moduleID, self::flagsSingular, false); 
 		}
 
+		// handle addFlag and removeFlag moduleInfo properties
+		foreach(array(0 => 'removeFlag', 1 => 'addFlag') as $add => $flagsType) {
+			if(empty($info[$flagsType])) continue;
+			if($flags & $info[$flagsType]) {
+				// already has the flags
+				if(!$add) {
+					// remove the flag(s)
+					$this->setFlag($moduleID, $info[$flagsType], false);
+				}
+			} else {
+				// does not have the flags
+				if($add) {
+					// add the flag(s)
+					$this->setFlag($moduleID, $info[$flagsType], true);
+				}
+			}
+		}
 	}
 
 	/**

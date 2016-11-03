@@ -34,6 +34,16 @@
  * $numSent = $mail->send();
  * 
  * @method int send()
+ * @property array $to
+ * @property array $toName
+ * @property string $from
+ * @property string $fromName
+ * @property string $subject
+ * @property string $body
+ * @property string $bodyHTML
+ * @property array $header
+ * @property array $param
+ * @property array $attachments
  *
  */
 
@@ -119,12 +129,14 @@ class WireMail extends WireData implements WireMailInterface {
 		$email = $this->sanitizeEmail($email); 
 		if(!strlen($name)) return $email;
 		$name = $this->sanitizeHeader($name); 
+		$delim = '';
 		if(strpos($name, ',') !== false) {
 			// name contains a comma, so quote the value
 			$name = str_replace('"', '', $name); // remove existing quotes
-			$name = '"' . $name . '"'; // surround w/quotes
+			$delim = '"';  // add quotes
 		}
-		return "$name <$email>";
+		// Encode the name part as quoted printable according to rfc2047
+		return $delim . $this->quotedPrintableString($name) . $delim . " <$email>";
 	}
 
 	/**
@@ -134,14 +146,14 @@ class WireMail extends WireData implements WireMailInterface {
 	 * you specify NULL as the email address, in which case it clears them all.
 	 *
 	 * @param string|array|null $email Specify any ONE of the following: 
-	 *	1. Single email address or "User Name <user@example.com>" string. 
+	 *	1. Single email address or "User Name <user@example.com>" string.
 	 * 	2. CSV string of #1. 
 	 * 	3. Non-associative array of #1. 
 	 * 	4. Associative array of (email => name)
 	 *	5. NULL (default value, to clear out any previously set values)
 	 * @param string $name Optionally provide a TO name, applicable
 	 *	only when specifying #1 (single email) for the first argument. 
-	 * @return this 
+	 * @return $this 
 	 * @throws WireException if any provided emails were invalid
 	 *
 	 */
@@ -192,7 +204,7 @@ class WireMail extends WireData implements WireMailInterface {
  	 * This sets the 'to name' for whatever the last added 'to' email address was.
 	 *
 	 * @param string 
-	 * @return this 
+	 * @return $this 
 	 * @throws WireException if you attempt to set a toName before a to email. 
 	 *
 	 */
@@ -207,9 +219,9 @@ class WireMail extends WireData implements WireMailInterface {
 	/**
 	 * Set the email from address
 	 *
-	 * @param string Must be a single email address or "User Name <user@example.com>" string.
+	 * @param string $email Must be a single email address or "User Name <user@example.com>" string.
 	 * @param string|null An optional FROM name (same as setting/calling fromName)
-	 * @return this 
+	 * @return $this 
 	 * @throws WireException if provided email was invalid
 	 *
 	 */
@@ -227,7 +239,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * all properties can be set with direct access, i.e. $mailer->fromName = 'User Name';
 	 *
 	 * @param string 
-	 * @return this 
+	 * @return $this 
 	 *
 	 */
 	public function fromName($name) {
@@ -239,7 +251,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * Set the email subject
 	 *
 	 * @param string $subject 
-	 * @return this 
+	 * @return $this 
 	 *
 	 */
 	public function subject($subject) {
@@ -251,7 +263,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * Set the email message body (text only)
 	 *
 	 * @param string $body in text only
-	 * @return this 
+	 * @return $this 
 	 *
 	 */
 	public function body($body) {
@@ -263,7 +275,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * Set the email message body (HTML only)
 	 *
 	 * @param string $body in HTML
-	 * @return this 
+	 * @return $this 
 	 *
 	 */
 	public function bodyHTML($body) {
@@ -279,7 +291,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 *
 	 * @param string $key
 	 * @param string $value
-	 * @return this 
+	 * @return $this 
 	 *
 	 */
 	public function header($key, $value) {
@@ -305,7 +317,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * This function may only be applicable to PHP mail().
 	 *
 	 * @param string $value
-	 * @return this 
+	 * @return $this 
 	 *
 	 */
 	public function param($value) {
@@ -319,13 +331,23 @@ class WireMail extends WireData implements WireMailInterface {
 
 	/**
 	 * Add a file to be attached to the email
+	 * 
+	 * ~~~~~~
+	 * $mail = new WireMail();
+	 * $mail->to('user@domain.com')->from('hello@world.com');
+	 * $mail->subject('Test attachment');
+	 * $mail->body('This is just a test of a file attachment');
+	 * $mail->attachment('/path/to/file.jpg'); 
+	 * $mail->send();
+	 * ~~~~~~
 	 *
-	 * Note: multiple calls will append attachments. 
+	 * Multiple calls will append attachments. 
 	 * To remove the supplied attachments, specify NULL as the value. 
-	 * This function may only be applicable to PHP mail().
+	 * This function may not be supported by 3rd party WireMail modules. 
 	 *
-	 * @param string $value
-	 * @return this 
+	 * @param string $value Full path and filename of file attachment
+	 * @param string $filename Optional different basename for file as it appears in the mail
+	 * @return $this 
 	 *
 	 */
 	public function attachment($value, $filename = '') {
@@ -348,7 +370,6 @@ class WireMail extends WireData implements WireMailInterface {
 	 */
 	public function ___send() {
 
-		$header = '';
 		$from = $this->from;
 		if(!strlen($from)) $from = $this->wire('config')->adminEmail;
 		if(!strlen($from)) $from = 'processwire@' . $this->wire('config')->httpHost; 
@@ -363,7 +384,6 @@ class WireMail extends WireData implements WireMailInterface {
 
 		$header = trim($header); 
 		$param = trim($param); 
-		$body = '';
 		$text = $this->body; 
 		$html = $this->bodyHTML;
 
@@ -376,21 +396,38 @@ class WireMail extends WireData implements WireMailInterface {
 
 			// Plain Text
 			$body = "This is a multi-part message in MIME format.\r\n\r\n" . 
-				"--$boundary\r\n" . 
-				"Content-Type: text/plain; charset=\"utf-8\"\r\n" . 
-				"Content-Transfer-Encoding: 7bit\r\n\r\n" . 
-				"$text\r\n\r\n";
+				"--$boundary\r\n";
+				
+			$textbody = "Content-Type: text/plain; charset=\"utf-8\"\r\n" . 
+				"Content-Transfer-Encoding: quoted-printable\r\n\r\n" . 
+				quoted_printable_encode($text) . "\r\n\r\n";
 
 			// HTML
 			if($this->bodyHTML){
-				$body .= "--$boundary\r\n" .
-					"Content-Type: text/html; charset=\"utf-8\"\r\n" . 
-					"Content-Transfer-Encoding: 7bit\r\n\r\n" . 
-					"$html\r\n\r\n";
+				$htmlbody = "Content-Type: text/html; charset=\"utf-8\"\r\n" . 
+					"Content-Transfer-Encoding: quoted-printable\r\n\r\n" . 
+					quoted_printable_encode($html) . "\r\n\r\n";
+				
+				if(count($this->attachments)) {
+					$subboundary = "==Multipart_Boundary_alt_x" . md5(time()) . "x";
+					
+					$body .= "Content-Type: multipart/alternative;\r\n	boundary=\"$subboundary\"\r\n\r\n" .
+						"--$subboundary\r\n" .
+						$textbody .
+						"--$subboundary\r\n" .
+						$htmlbody .
+						"--$subboundary--\r\n\r\n";
+				} else {
+					$body .= $textbody .
+						"--$boundary\r\n" .
+						$htmlbody;
+				}
+			} else {
+				$body .= $textbody;
 			}
 
 			// Attachments
-			foreach ($this->attachments as $filename => $file) {
+			foreach($this->attachments as $filename => $file) {
 				$content = file_get_contents($file);
 				$content = chunk_split(base64_encode($content));
 
@@ -404,17 +441,102 @@ class WireMail extends WireData implements WireMailInterface {
 			$body .= "--$boundary--\r\n";
 
 		} else {
-			$header .= "\r\nContent-Type: text/plain; charset=\"utf-8\""; 
-			$body = $text; 
+			$header .= "\r\nContent-Type: text/plain; charset=UTF-8\r\n" .
+				"Content-Transfer-Encoding: quoted-printable"; 
+			$body = quoted_printable_encode($text); 
 		}
 
 		$numSent = 0;
 		foreach($this->to as $to) {
 			$toName = $this->mail['toName'][$to]; 
 			if($toName) $to = $this->bundleEmailAndName($to, $toName); // bundle to "User Name <user@example.com"
-			if(@mail($to, $this->subject, $body, $header, $param)) $numSent++;
+			$subject = $this->encodeSubject($this->subject);
+			if($param) {
+				if(@mail($to, $subject, $body, $header, $param)) $numSent++;
+			} else {
+				if(@mail($to, $subject, $body, $header)) $numSent++;
+			}
 		}
 
 		return $numSent; 
+	}
+	
+	/**
+	 * Encode the subject, use mbstring if available
+	 *
+	 * @param string $subject
+	 * @return string
+	 *
+	 */
+	public function encodeSubject($subject) {
+		
+		if(extension_loaded("mbstring")) {
+			// Need to pass in the header name and subtract it afterwards,
+			// otherwise the first line would grow too long
+			return substr(mb_encode_mimeheader("Subject: $subject", 'UTF-8', 'Q', "\r\n"), 9);
+		}
+
+		$out = array();
+		$isFirst = true;
+		$n = 0;
+
+		while(strlen($subject) > 0 && ++$n < 50) {
+			$part = $this->findBestEncodePart($subject, 63, $isFirst);
+			$out[] = $this->quotedPrintableString($part);
+			$subject = substr($subject, strlen($part));
+			$isFirst = false;
+		}
+		
+		return implode("\r\n ", $out);
+	}
+	
+	/**
+	 * Tries to split the passed subject at a whitespace at or before $maxlen,
+	 * falling back to a hard substr if none was found, and returns the
+	 * left part.
+	 *
+	 * Makes sure that the quoted-printable encoded part is inside the 76 characters
+	 * header limit (66 for first line that has the header name, minus a buffer
+	 * of 2 characters for whitespace) given in rfc2047.
+	 *
+	 * @param string $input The subject to encode
+	 * @param int $maxlen Maximum length of unencoded string, defaults to 63
+	 * @param bool $isFirst Set to true for first line to account for the header name
+	 * @return string
+	 *
+	 */
+	protected function findBestEncodePart($input, $maxlen = 63, $isFirst = false) {
+		$maxEffLen = $maxlen - ($isFirst ? 10 : 0);
+
+		if(strlen($input) <= $maxEffLen) {
+			$part = $input;
+		} else if(strpos($input, " ") === FALSE || strrpos($input, " ") === FALSE || strpos($input, " ") > $maxEffLen) {
+			// Force cutting of subject since there is no whitespace to break on
+			$part = substr($input, $maxlen - $maxEffLen);
+		} else {
+			$searchstring = substr($input, 0, $maxEffLen);
+			$lastpos = strrpos($searchstring, " ");
+			$part = substr($input, 0, $lastpos);
+		}
+
+		if(strlen($this->quotedPrintableString($part)) > 74 - ($isFirst ? 10 : 0)) {
+			return $this->findBestEncodePart($input, $maxlen - 1, $isFirst);
+		}
+
+		return $part;
+	}
+	
+	/**
+	 * Return the text quoted-printable encoded
+	 *
+	 * Uses short notation for charset and encoding suitable for email headers
+	 * as laid out in rfc2047.
+	 *
+	 * @param string $text
+	 * @return string
+	 *
+	 */
+	public function quotedPrintableString($text) {
+		return '=?utf-8?Q?' . quoted_printable_encode($text) . '?=';
 	}
 }
