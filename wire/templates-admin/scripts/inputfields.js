@@ -437,6 +437,7 @@ function InputfieldDependencies($target) {
 			if($fieldToShow.is('.InputfieldStateHidden')) {
 				// field is hidden so show/fade in
 				$fieldToShow.removeClass('InputfieldStateHidden').fadeIn();
+				$(document).trigger('showInputfield', $fieldToShow);
 				numVisibilityChanges++;
 				consoleLog('Field is now visible.');
 			} else {
@@ -447,6 +448,7 @@ function InputfieldDependencies($target) {
 			// hide it
 			if(!$fieldToShow.is('.InputfieldStateHidden')) {
 				$fieldToShow.addClass('InputfieldStateHidden').hide();
+				$(document).trigger('hideInputfield', $fieldToShow);
 				consoleLog('Field is now hidden.');
 				numVisibilityChanges++;
 			} else {
@@ -1035,7 +1037,7 @@ function InputfieldStates($target) {
 		if($newTab.hasClass('collapsed10')) InputfieldStateAjaxClick($newTab);
 	});
 	
-	$(document).on('click', '.InputfieldStateToggle, .toggle-icon', function() {
+	$(document).on('click', '.InputfieldStateToggle, .toggle-icon', function(event, data) {
 		
 		var $t = $(this);
 		var $li = $t.closest('.Inputfield');
@@ -1043,7 +1045,13 @@ function InputfieldStates($target) {
 		var $icon = isIcon ? $t : $li.children('.InputfieldHeader, .ui-widget-header').find('.toggle-icon'); 
 		var isCollapsed = $li.hasClass("InputfieldStateCollapsed"); 
 		var wasCollapsed = $li.hasClass("InputfieldStateWasCollapsed");
+		var duration = 100;
+		
 		if($li.hasClass('InputfieldAjaxLoading')) return false;
+		
+		if(typeof data != "undefined") {
+			if(typeof data.duration != "undefined") duration = data.duration;
+		}
 
 		if(isCollapsed && ($li.hasClass('collapsed10') || $li.hasClass('collapsed11'))) {
 			if(InputfieldStateAjaxClick($li)) return false;
@@ -1052,7 +1060,7 @@ function InputfieldStates($target) {
 		if(isCollapsed || wasCollapsed || isIcon) {
 			$li.addClass('InputfieldStateWasCollapsed'); // this class only used here
 			$li.trigger(isCollapsed ? 'openReady' : 'closeReady');
-			$li.toggleClass('InputfieldStateCollapsed', 100, function() {
+			$li.toggleClass('InputfieldStateCollapsed', duration, function() {
 				if(isCollapsed) {
 					$li.trigger('opened');
 					if($li.hasClass('InputfieldColumnWidth')) $li.children('.InputfieldContent').show();
@@ -1282,7 +1290,7 @@ jQuery(document).ready(function($) {
 				}
 			}
 			$t.children(".InputfieldContent").html($content.html());
-			if(typeof jQuery.ui != 'undefined') $t.effect("highlight", 1000); 
+			// if(typeof jQuery.ui != 'undefined') $t.effect("highlight", 1000); 
 			$t.trigger('reloaded', [ 'reload' ]); 
 		});
 		event.stopPropagation();

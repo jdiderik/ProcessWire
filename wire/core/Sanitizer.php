@@ -68,7 +68,7 @@ class Sanitizer extends Wire {
 	 *
 	 */
 	public function __construct() {
-		$this->multibyteSupport = function_exists("mb_strlen"); 
+		$this->multibyteSupport = function_exists("mb_internal_encoding"); 
 		if($this->multibyteSupport) mb_internal_encoding("UTF-8");
 		$this->allowedASCII = str_split('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789');
 	}
@@ -914,15 +914,15 @@ class Sanitizer extends Wire {
 	 * #pw-group-strings
 	 *
 	 * @param string $value String value to sanitize
-	 * @param array $options Options to modify default behavior: 
-	 *  - `maxLength` (int): maximum characters allowed, or 0=no max (default=255).
-	 *  - `maxBytes` (int): maximum bytes allowed (default=0, which implies maxLength*4).
-	 *  - `stripTags` (bool): strip markup tags? (default=true).
-	 *  - `allowableTags` (string): markup tags that are allowed, if stripTags is true (use same format as for PHP's `strip_tags()` function.
-	 *  - `multiLine` (bool): allow multiple lines? if false, then $newlineReplacement below is applicable (default=false).
-	 *  - `newlineReplacement` (string): character to replace newlines with, OR specify boolean TRUE to remove extra lines (default=" ").
-	 *  - `inCharset` (string): input character set (default="UTF-8").
-	 *  - `outCharset` (string): output character set (default="UTF-8").
+	 * @param array $options Options to modify default behavior:
+	 * - `maxLength` (int): maximum characters allowed, or 0=no max (default=255).
+	 * - `maxBytes` (int): maximum bytes allowed (default=0, which implies maxLength*4).
+	 * - `stripTags` (bool): strip markup tags? (default=true).
+	 * - `allowableTags` (string): markup tags that are allowed, if stripTags is true (use same format as for PHP's `strip_tags()` function.
+	 * - `multiLine` (bool): allow multiple lines? if false, then $newlineReplacement below is applicable (default=false).
+	 * - `newlineReplacement` (string): character to replace newlines with, OR specify boolean TRUE to remove extra lines (default=" ").
+	 * - `inCharset` (string): input character set (default="UTF-8").
+	 * - `outCharset` (string): output character set (default="UTF-8").
 	 * @return string
 	 * @see Sanitizer::textarea()
 	 *
@@ -1007,7 +1007,7 @@ class Sanitizer extends Wire {
 	 *
 	 * @param string $value String value to sanitize
 	 * @param array $options Options to modify default behavior
-	 * 	- `maxLength` (int): maximum characters allowed, or 0=no max (default=16384 or 16kb).
+	 *  - `maxLength` (int): maximum characters allowed, or 0=no max (default=16384 or 16kb).
 	 *  - `maxBytes` (int): maximum bytes allowed (default=0, which implies maxLength*3 or 48kb).
 	 *  - `stripTags` (bool): strip markup tags? (default=true).
 	 *  - `allowableTags` (string): markup tags that are allowed, if stripTags is true (use same format as for PHP's `strip_tags()` function.
@@ -1070,9 +1070,10 @@ class Sanitizer extends Wire {
 		if(strpos($value, '<') !== false) {
 			// tag replacements before strip_tags()
 			$regex =
-				'!(?:<' .
-				'/?(?:ul|ol|p|h\d|div)(?:>|\s[^><]*)' .
-				'|br[\s/]*' .
+				'!<(?:' .
+					'/?(?:ul|ol|p|h\d|div)(?:>|\s[^><]*)' .
+					'|' . 
+					'(?:br[\s/]*)' .
 				')>!is';
 			$value = preg_replace($regex, $newline, $value);
 			if(stripos($value, '</li>')) {
@@ -1588,14 +1589,13 @@ class Sanitizer extends Wire {
 	 * for text coming from user input since it doesn't allow any other HTML. But if you just
 	 * want full markdown, then specify TRUE for the `$options` argument. 
 	 * 
-	 * ~~~~~
 	 * Basic allowed markdown currently includes: 
-	 * **strong**
-	 * *emphasis*
-	 * [anchor-text](url)
-	 * ~~strikethrough~~
-	 * `code`
-	 * ~~~~~
+	 * - `**strong**`
+	 * - `*emphasis*`
+	 * - `[anchor-text](url)`
+	 * - `~~strikethrough~~`
+	 * - code surrounded by backticks
+	 * 
 	 * ~~~~~
 	 * // basic markdown
 	 * echo $sanitizer->entitiesMarkdown($str); 
@@ -1823,9 +1823,11 @@ class Sanitizer extends Wire {
 			$value = "";
 		} else if(is_bool($value)) {
 			$value = $value ? "1" : "";
+		} else if(is_array($value)) {
+			$value = "array-" . count($value);
+		} else if(!is_string($value)) {
+			$value = (string) $value;
 		}
-		if(is_array($value)) $value = "array-" . count($value);
-		if(!is_string($value)) $value = (string) $value;
 		if(!is_null($sanitizer) && is_string($sanitizer) && (method_exists($this, $sanitizer) || method_exists($this, "___$sanitizer"))) {
 			$value = $this->$sanitizer($value);
 			if(!is_string($value)) $value = (string) $value;
@@ -2178,10 +2180,11 @@ class Sanitizer extends Wire {
 	 * #pw-group-arrays
 	 *
 	 * @param array $data Array to reduce
-	 * @param bool|array $allowEmpty Should empty values be allowed in the encoded data?
+	 * @param bool|array $allowEmpty Should empty values be allowed in the encoded data? Specify any of the following:
 	 *  - `false` (bool): to exclude all empty values (this is the default if not specified).
 	 *  - `true` (bool): to allow all empty values to be retained (thus no point in calling this function).
 	 *  - Specify array of keys (from data) that should be retained if you want some retained and not others.
+	 *  - Specify array of literal empty value types to retain, i.e. [ 0, '0', array(), false, null ]
 	 *  - Specify the digit `0` to retain values that are 0, but not other types of empty values.
 	 * @param bool $convert Perform type conversions where appropriate? i.e. convert digit-only string to integer (default=false). 
 	 * @return array
@@ -2191,6 +2194,14 @@ class Sanitizer extends Wire {
 		
 		if(!is_array($data)) {
 			$data = $this->___array($data, null);
+		}
+	
+		$allowEmptyTypes = array();
+		if(is_array($allowEmpty)) {
+			foreach($allowEmpty as $emptyType) {
+				if(!empty($emptyType)) continue;
+				$allowEmptyTypes[] = $emptyType;
+			}
 		}
 
 		foreach($data as $key => $value) {
@@ -2208,20 +2219,32 @@ class Sanitizer extends Wire {
 
 			$data[$key] = $value;
 
-			// skip empty values whether blank, 0, empty array, etc. 
-			if(empty($value)) {
-
-				if($allowEmpty === 0 && $value === 0) {
-					// keep it because $allowEmpty === 0 means to keep 0 values only
-
-				} else if(is_array($allowEmpty) && !in_array($key, $allowEmpty)) {
-					// remove it because it's not specifically allowed in allowEmpty
-					unset($data[$key]);
-
-				} else if(!$allowEmpty) {
-					// remove the empty value
-					unset($data[$key]);
+			// if value is not empty, no need to continue further checks
+			if(!empty($value)) continue;
+			
+			$typeMatched = false;
+			if(count($allowEmptyTypes)) {
+				foreach($allowEmptyTypes as $emptyType) {
+					if($value === $emptyType) {
+						$typeMatched = true;
+						break;
+					}
 				}
+			}
+			
+			if($typeMatched) {
+				// keep it because type matched an allowEmptyTypes
+
+			} else if($allowEmpty === 0 && $value === 0) {
+				// keep it because $allowEmpty === 0 means to keep 0 values only
+				
+			} else if(is_array($allowEmpty) && !in_array($key, $allowEmpty)) {
+				// remove it because it's not specifically allowed in allowEmpty
+				unset($data[$key]);
+
+			} else if(!$allowEmpty) {
+				// remove the empty value
+				unset($data[$key]);
 			}
 		}
 
@@ -2314,42 +2337,50 @@ class Sanitizer extends Wire {
 	 */
 	public function testAll($value) {
 		$sanitizers = array(
+			'alpha', 
+			'alphanumeric',
+			'array',
+			'bool',
+			'date',
+			'digits', 
+			'email',
+			'emailHeader',
+			'entities',
+			'entities1',
+			'entitiesMarkdown',
+			'fieldName',
+			'filename',
+			'float',
+			'int',
+			'intArray',
+			'intSigned',
+			'intUnsigned',
+			'markupToLine',
+			'markupToText',
+			'minArray',
 			'name',
 			'names',
-			'varName',
-			'fieldName',
-			'templateName',
 			'pageName',
 			'pageNameTranslate',
 			'pageNameUTF8',
-			'filename',
-			'path', 
 			'pagePathName',
-			'email',
-			'emailHeader',
-			'text',
-			'textarea',
-			'url',
+			'pagePathNameUTF8',
+			'path',
+			'purify',
+			'removeNewlines',
 			'selectorField',
 			'selectorValue',
-			'entities',
-			'entities1',
-			'unentities',
-			'entitiesMarkdown',
-			'purify',
 			'string',
-			'date',
-			'int',
-			'intUnsigned',
-			'intSigned',
-			'float',
-			'array',
-			'intArray',
-			'bool',
+			'templateName',
+			'text',
+			'textarea',
+			'unentities',
+			'url',
+			'varName',
 		);
 		$results = array();
 		foreach($sanitizers as $method) {
-			$results[$method] = $this->$method($value);	
+			$results[$method] = $this->$method($value);
 		}
 		return $results;
 	}

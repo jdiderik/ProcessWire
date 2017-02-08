@@ -371,7 +371,6 @@ class PageRender extends WireData implements Module, ConfigurableModule {
 	 *	variables of your own names to $options as needed for communication with the template, if it suits your need. 
 	 *
 	 * @param HookEvent $event
-	 * @return string rendered data
 	 * @throws WirePermissionException|WireException
 	 *
 	 */
@@ -514,6 +513,13 @@ class PageRender extends WireData implements Module, ConfigurableModule {
 			$profilerEvent = $profiler ? $profiler->start($page->path, $this, array('page' => $page)) : null;
 			$data = $output->render();
 			if($profilerEvent) $profiler->stop($profilerEvent);
+			if(!strlen($data) && $page->template->name === 'admin' && !is_readable($options['filename'])) {
+				throw new WireException('Missing or non-readable template file: ' . basename($options['filename']));
+			}
+		}
+	
+		if($this->wire('config')->useMarkupRegions) {
+			$this->populateMarkupRegions($data);
 		}
 
 		if($data && $cacheAllowed && $cacheFile) $cacheFile->save($data);
@@ -525,6 +531,28 @@ class PageRender extends WireData implements Module, ConfigurableModule {
 		}
 		if(count($this->pageStack)) array_pop($this->pageStack); 
 		$this->renderRecursionLevel--;
+	}
+
+	/**
+	 * Populate markup regions directly to $html
+	 * 
+	 * @param $html
+	 * 
+	 */
+	protected function populateMarkupRegions(&$html) {
+		$pos = stripos($html, '<!DOCTYPE');
+		if($pos === false) {
+			// if no doctype match, attempt an html tag match
+			$pos = stripos($html, '<html'); 
+		}
+		if($pos) {
+			// split document at doctype/html boundary
+			$htmlBefore = substr($html, 0, $pos);
+			$html = substr($html, $pos);
+			$markupRegions = new WireMarkupRegions();
+			$this->wire($markupRegions);
+			$markupRegions->populate($html, $htmlBefore);
+		}
 	}
 
 	/**

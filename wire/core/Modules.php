@@ -14,6 +14,17 @@
  * https://processwire.com
  * 
  * #pw-summary Loads and manages all modules in ProcessWire. 
+ * #pw-body = 
+ * The `$modules` API variable is most commonly used for getting individual modules to use their API. 
+ * ~~~~~
+ * // Getting a module by name
+ * $m = $modules->get('MarkupPagerNav');
+ * 
+ * // Getting a module by name (alternate)
+ * $m = $modules->MarkupPagerNav;
+ * ~~~~~
+ * 
+ * #pw-body
  * 
  * @todo Move all module information methods to a ModulesInfo class
  * @todo Move all module loading methods to a ModulesLoad class
@@ -23,7 +34,7 @@
  * @method bool|int delete($class)
  * @method bool uninstall($class)
  * @method bool saveModuleConfigData($className, array $configData) Alias of saveConfig() method #pw-internal
- * @method bool saveConfig($class, array $data) 
+ * @method bool saveConfig($class, $data, $value = null)
  * @method InputfieldWrapper|null getModuleConfigInputfields($moduleName, InputfieldWrapper $form = null)  #pw-internal
  * @method void moduleVersionChanged(Module $module, $fromVersion, $toVersion) #pw-internal
  *
@@ -1156,7 +1167,7 @@ class Modules extends WireArray {
 	 * Get the requested Module (with options)
 	 * 
 	 * This is the same as `$modules->get()` except that you can specify additional options to modify default behavior.
-	 * These are the options you can speicfy in the `$options` array argument:
+	 * These are the options you can specify in the `$options` array argument:
 	 * 
 	 *  - `noPermissionCheck` (bool): Specify true to disable module permission checks (and resulting exception).
 	 *  - `noInstall` (bool): Specify true to prevent a non-installed module from installing from this request.
@@ -2456,7 +2467,8 @@ class Modules extends WireArray {
 	 * $moduleInfo = $modules->getModuleInfoVerbose('MarkupAdminDataTable');
 	 * ~~~~~
 	 * 
-	 * @param string|Module|int $class May be class name, module instance, or module ID
+	 * @param string|Module|int $class May be class name, module instance, or module ID. 
+	 *   Specify "*" or "all" to retrieve module info for all modules. 
 	 * @param array $options Optional options to modify behavior of what gets returned
 	 *  - `verbose` (bool): Makes the info also include additional properties (they will be usually blank without this option specified).
 	 *  - `noCache` (bool): prevents use of cache to retrieve the module info.
@@ -2544,10 +2556,21 @@ class Modules extends WireArray {
 				if(!count($info)) $info = $this->getModuleInfoInternal($module); 
 			}
 			
-		} else if($module == 'PHP' || $module == 'ProcessWire') { 
+		} else if($module == 'PHP' || $module == 'ProcessWire') {
 			// module is a system 
-			$info = $this->getModuleInfoSystem($module); 
+			$info = $this->getModuleInfoSystem($module);
 			return array_merge($infoTemplate, $info);
+			
+		} else if($module === '*' || $module === 'all') {
+			if(empty($this->moduleInfoCache)) $this->loadModuleInfoCache();
+			$modulesInfo = $this->moduleInfoCache;
+			if($options['verbose']) {
+				if(empty($this->moduleInfoCacheVerbose)) $this->loadModuleInfoCacheVerbose();
+				foreach($this->moduleInfoCacheVerbose as $moduleID => $moduleInfoVerbose) {
+					$modulesInfo[$moduleID] = array_merge($modulesInfo[$moduleID], $moduleInfoVerbose);
+				}
+			}
+			return $modulesInfo;
 			
 		} else {
 			
@@ -4704,6 +4727,8 @@ class Modules extends WireArray {
 
 	/**
 	 * Compile and return the given file for module, if allowed to do so
+	 * 
+	 * #pw-internal
 	 * 
 	 * @param Module|string $moduleName
 	 * @param string $file Optionally specify the module filename as an optimization

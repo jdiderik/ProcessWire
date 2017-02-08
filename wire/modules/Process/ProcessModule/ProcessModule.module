@@ -564,7 +564,7 @@ class ProcessModule extends Process {
 		$submit = $this->modules->get('InputfieldButton');
 		$submit->attr('href', './?reset=1');
 		$submit->attr('id', 'reset_modules');
-		$submit->attr('class', $submit->attr('class') . ' head_button_clone');
+		$submit->showInHeader();
 		$submit->attr('name', 'reset');
 		$submit->attr('value', $this->labels['reset']);
 		$submit->icon = $fieldset->icon;
@@ -617,7 +617,7 @@ class ProcessModule extends Process {
 
 		foreach($modulesArray as $name => $installed) {
 
-			if(strpos($name, $section) !== 0 || preg_match('/' . $section . '[^A-Z]/', $name)) {
+			if(strpos($name, $section) !== 0 || preg_match('/' . $section . '[^A-Z0-9]/', $name)) {
 				if(!preg_match('/^([A-Za-z][a-z]+)/', $name, $matches)) $this->error(sprintf($this->_('Invalid module name: %s'), $name));
 				if($allowSections || is_null($table)) { 
 					$section = $matches[1];
@@ -1249,7 +1249,7 @@ class ProcessModule extends Process {
 		if(count($form->children)) {
 			$field = $this->modules->get("InputfieldSubmit"); 
 			$field->attr('name', 'submit_save_module'); 
-			$field->addClass('head_button_clone'); 
+			$field->showInHeader();
 			$field->addActionValue('exit', sprintf($this->_('%s + Exit'), $field->attr('value')), 'times');
 			$form->append($field);
 			

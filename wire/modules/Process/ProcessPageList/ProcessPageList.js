@@ -129,7 +129,6 @@ $(document).ready(function() {
 		var ignoreClicks = false;
 		
 		var isModal = $("body").hasClass("modal");
-		var isTouch = $("body").hasClass("touch");
 	
 		$.extend(options, customOptions);
 
@@ -167,7 +166,7 @@ $(document).ready(function() {
 					*/
 				}
 				
-				if(options.useHoverActions && !$("body").hasClass('touch-device')) {
+				if(options.useHoverActions) { 
 					$root.addClass('PageListUseHoverActions');
 					setupHoverActions();
 				}
@@ -472,7 +471,7 @@ $(document).ready(function() {
 				var processChildren = function(data) {
 
 					if(data && data.error) {
-						alert(data.message); 
+						ProcessWire.alert(data.message); 
 						$loading.hide();
 						ignoreClicks = false;
 						return; 
@@ -668,7 +667,7 @@ $(document).ready(function() {
 						else actionName = action.cn; // cn = className
 
 					var $a = $("<a></a>").html(action.name).attr('href', action.url);
-					if(!isModal && !isTouch) {
+					if(!isModal) {
 						if(action.cn == 'Edit') {
 							$a.addClass('pw-modal pw-modal-large pw-modal-longclick');
 							$a.attr('data-buttons', '#ProcessPageEdit > .Inputfields > .InputfieldSubmit .ui-button');
@@ -840,7 +839,7 @@ $(document).ready(function() {
 								} else {
 									// data.success === false, so display error
 									$spinner.remove();
-									alert(data.message);
+									ProcessWire.alert(data.message);
 								}
 							});
 							return false;
@@ -1161,7 +1160,7 @@ $(document).ready(function() {
 					}); 
 
 					if(data && data.error) {
-						alert(data.message); 
+						ProcessWire.alert(data.message); 
 					}
 
 					// if item moved from one list to another, then update the numChildren counts

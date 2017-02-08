@@ -28,7 +28,7 @@
  * @method void loginFailure($name, $reason) #pw-hooker
  * @method void logoutSuccess(User $user) #pw-hooker
  * 
- * @property SessionCSRF $CSRF
+ * @property SessionCSRF $CSRF 
  *
  * Expected $config variables include: 
  * ===================================
@@ -395,9 +395,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 */
 	public function get($key, $_key = null) {
 		if($key == 'CSRF') {
-			if(!$this->sessionInit) $this->init(); // init required for CSRF
-			if(is_null($this->CSRF)) $this->CSRF = $this->wire(new SessionCSRF());
-			return $this->CSRF; 
+			return $this->CSRF();
 		} else if(!is_null($_key)) {
 			// namespace
 			return $this->getFor($key, $_key);
@@ -738,7 +736,7 @@ class Session extends Wire implements \IteratorAggregate {
 				$this->set('_user', 'challenge', $challenge); 
 				$secure = $this->config->sessionCookieSecure ? (bool) $this->config->https : false;
 				// set challenge cookie to last 30 days (should be longer than any session would feasibly last)
-				setcookie(session_name() . '_challenge', $challenge, time()+60*60*24*30, '/', null, $secure, true); // PR #1264
+				setcookie(session_name() . '_challenge', $challenge, time()+60*60*24*30, '/', $this->config->sessionCookieDomain, $secure, true); // PR #1264
 			}
 
 			if($this->config->sessionFingerprint) { 
@@ -892,10 +890,10 @@ class Session extends Wire implements \IteratorAggregate {
 		$time = time() - 42000;
 		$secure = $this->config->sessionCookieSecure ? (bool) $this->config->https : false;
 		if(isset($_COOKIE[$sessionName])) {
-			setcookie($sessionName, '', $time, '/', null, $secure, true);
+			setcookie($sessionName, '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
 		}
 		if(isset($_COOKIE[$sessionName . "_challenge"])) {
-			setcookie($sessionName . "_challenge", '', $time, '/', null, $secure, true);
+			setcookie($sessionName . "_challenge", '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
 		}
 	}
 
@@ -1131,6 +1129,34 @@ class Session extends Wire implements \IteratorAggregate {
 		foreach(array('message', 'error', 'warning') as $type) {
 			$this->remove($type);
 		}
+	}
+
+	/**
+	 * Return an instance of ProcessWire’s CSRF object, which provides an API for cross site request forgery protection.
+	 * 
+	 * ~~~~
+	 * // output somewhere in <form> markup when rendering a form
+	 * echo $session->CSRF->renderInput();
+	 * ~~~~
+	 * ~~~~ 
+	 * // when processing form (POST request), check to see if token is present
+	 * if($session->CSRF->hasValidToken()) {
+	 *   // form submission is valid
+	 *   // okay to process
+	 * } else {
+	 *   // form submission is NOT valid
+	 *   throw new WireException('CSRF check failed!');
+	 * }
+	 * ~~~~
+	 * 
+	 * @return SessionCSRF
+	 * @see SessionCSRF::renderInput(), SessionCSRF::validate(), SessionCSRF::hasValidToken()
+	 * 
+	 */
+	public function CSRF() {
+		if(!$this->sessionInit) $this->init(); // init required for CSRF
+		if(is_null($this->CSRF)) $this->CSRF = $this->wire(new SessionCSRF());
+		return $this->CSRF; 
 	}
 
 }

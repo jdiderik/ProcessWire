@@ -546,7 +546,7 @@ function InputfieldImage($) {
 			var $button = $(this);
 			var $list = $button.closest('.gridImages');
 			if(!$list.hasClass('gridImagesAlerted')) {
-				alert(ProcessWire.config.InputfieldImage.labels.changes);
+				ProcessWire.alert(ProcessWire.config.InputfieldImage.labels.changes);
 				$list.addClass('gridImagesAlerted');
 			}
 			setTimeout(function() {
@@ -1400,6 +1400,7 @@ function InputfieldImage($) {
 
 				// File uploaded: called for each file
 				xhr.addEventListener("load", function() {
+					xhr.getAllResponseHeaders();
 					var response = $.parseJSON(xhr.responseText),
 						wasZipFile = response.length > 1;
 					if(response.error !== undefined) response = [response];

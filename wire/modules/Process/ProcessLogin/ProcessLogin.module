@@ -177,6 +177,7 @@ class ProcessLogin extends Process {
 			if($this->isAdmin) {
 				$this->session->set('hidpi', $this->wire('input')->post->login_hidpi ? true : false);
 				$this->session->set('touch', $this->wire('input')->post->login_touch ? true : false);
+				$this->session->set('clientWidth', (int) $this->wire('input')->post('login_width'));
 				$this->session->remove('error');
 				$this->afterLogin();
 			}
@@ -269,7 +270,6 @@ class ProcessLogin extends Process {
 	/**
 	 * Hook called after login
 	 *
-	 * @todo: move the following elsewhere out of this class: 
 	 * Notify admin if there are any issues that need their attention.
 	 * Happens only on the admin login form after superuser login. 
 	 *
@@ -335,6 +335,17 @@ class ProcessLogin extends Process {
 			$this->error("Warning: you have a field named 'published' that conflicts with the page 'published' property. Please rename your field field to something else and update any templates referencing it.");
 		}
 
+		// warning about servers with locales that break UTF-8 strings called by basename
+		// and other file functions, due to a long running PHP bug 
+		if(basename("§") === "") { 
+			$s = stripos(PHP_OS, 'WIN') === 0 ? 'en-US' : 'en_US.UTF-8';
+			$this->warning(
+				$this->_('Warning: your server locale is undefined and may cause issues.') . ' ' . 
+				sprintf($this->_('Please add this to /site/config.php file (adjust “%s” as needed):'), $s) . ' ' . 
+				"setlocale(LC_ALL,'$s');"
+			);
+		}
+
 	}
 
 	/**
@@ -384,6 +395,12 @@ class ProcessLogin extends Process {
 			// detect touch device login (populated from js)
 			$f = $this->modules->get('InputfieldHidden');
 			$f->attr('id+name', 'login_touch');
+			$f->attr('value', 0);
+			$this->form->add($f);
+			
+			// detect touch device login (populated from js)
+			$f = $this->modules->get('InputfieldHidden');
+			$f->attr('id+name', 'login_width');
 			$f->attr('value', 0);
 			$this->form->add($f);
 		}
