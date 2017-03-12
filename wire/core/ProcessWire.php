@@ -45,7 +45,7 @@ class ProcessWire extends Wire {
 	 * Reversion revision number
 	 * 
 	 */
-	const versionRevision = 54;
+	const versionRevision = 55;
 
 	/**
 	 * Version suffix string (when applicable)
@@ -772,7 +772,6 @@ class ProcessWire extends Wire {
 		$rootPath = rtrim($rootPath, '/');
 		$_rootURL = $rootURL;
 		if(is_null($rootURL)) $rootURL = '/';
-		$sitePath = $rootPath . "/$siteDir/";
 		
 		// check what rootPath is referring to
 		if(strpos($rootPath, "/$siteDir")) {
@@ -834,6 +833,7 @@ class ProcessWire extends Wire {
 		}
 
 		// other default directories
+		$sitePath = $rootPath . "/$siteDir/";
 		$wireDir = "wire";
 		$coreDir = "$wireDir/core";
 		$assetsDir = "$siteDir/assets";
