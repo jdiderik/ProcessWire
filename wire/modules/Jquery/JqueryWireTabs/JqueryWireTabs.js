@@ -11,6 +11,7 @@
 
 		var options = {
 			rememberTabs: 0, // -1 = no, 0 = only after submit, 1 = always
+			requestID: '', 
 			cookieName: 'WireTabs',
 			items: null,
 			skipRememberTabIDs: [],
@@ -24,7 +25,7 @@
 
 		var totalTabs = 0; 
 		var cfg = ProcessWire.config.JqueryWireTabs;
-		var keys = [ 'rememberTabs', 'cookieName', 'liActiveClass', 'aActiveClass', 'ulClass', 'ulAttrs' ];
+		var keys = [ 'rememberTabs', 'requestID', 'cookieName', 'liActiveClass', 'aActiveClass', 'ulClass', 'ulAttrs' ];
 		
 		for(var n = 0; n < keys.length; n++) {
 			var key = keys[n];
@@ -126,8 +127,18 @@
 				if($t.hasClass('WireTabTip') || tip) {
 					// if the tab being added has the class 'WireTabTip' or has a data-tooltip attribute
 					// then display a tooltip with the tab
-					$a.addClass('tooltip');
-					$a.attr('title', tip ? tip : title); 
+					if(!tip) tip = title;
+					for(var key in cfg.tooltipAttr) {
+						var val = cfg.tooltipAttr[key];
+						if(val.indexOf('{tip}') > -1) val = val.replace('{tip}', tip); 
+						if(key === 'class') {
+							$a.addClass(val);
+						} else {
+							$a.attr(key, val); 
+						}
+					}
+					// $a.addClass('tooltip');
+					// $a.attr('title', tip ? tip : title); 
 				}
 				$t.hide();
 				// the following removed to prevent DOM manipulation if the tab content:
@@ -160,7 +171,7 @@
 				$newTab.addClass(aActiveClass);
 			
 				if(liActiveClass.length) {
-					$oldTab.closest('li').removeClass(liActiveClass);
+					$tabList.find('li.' + liActiveClass).removeClass(liActiveClass);
 					$newTab.closest('li').addClass(liActiveClass);
 				}
 				
@@ -186,11 +197,11 @@
 			}
 
 			function setTabCookie(value) {
-				document.cookie = options.cookieName + '=' + escape(value);
+				document.cookie = options.cookieName + '=' + options.requestID + '-' + escape(value);
 			}
 	
 			function getTabCookie() {
-				var regex = new RegExp('(?:^|;)\\s?' + options.cookieName + '=(.*?)(?:;|$)','i');
+				var regex = new RegExp('(?:^|;)\\s?' + options.cookieName + '=' + options.requestID + '-(.*?)(?:;|$)','i');
 				var match = document.cookie.match(regex);	
 				match = match ? match[1] : '';
 				return match;

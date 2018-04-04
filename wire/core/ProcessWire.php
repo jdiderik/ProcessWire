@@ -17,7 +17,7 @@ require_once(__DIR__ . '/boot.php');
  * ~~~~~
  * #pw-body
  * 
- * ProcessWire 3.x, Copyright 2017 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2018 by Ryan Cramer
  * https://processwire.com
  * 
  * @method init()
@@ -45,7 +45,7 @@ class ProcessWire extends Wire {
 	 * Reversion revision number
 	 * 
 	 */
-	const versionRevision = 55;
+	const versionRevision = 96;
 
 	/**
 	 * Version suffix string (when applicable)
@@ -253,11 +253,13 @@ class ProcessWire extends Wire {
 
 		if($config->https === null) {
 			$config->https = (!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) == 'on')
-				|| (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443);
+				|| (isset($_SERVER['SERVER_PORT']) && $_SERVER['SERVER_PORT'] == 443)
+				|| (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO']) == 'https'); // AWS LOAD BALANCER
 		}
 		
 		$config->ajax = (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] == 'XMLHttpRequest');
-		$config->cli = (!isset($_SERVER['SERVER_SOFTWARE']) && (php_sapi_name() == 'cli' || ($_SERVER['argc'] > 0 && is_numeric($_SERVER['argc']))));
+		$config->cli = (!isset($_SERVER['SERVER_SOFTWARE']) && (php_sapi_name() == 'cli' || (isset($_SERVER['argc']) && $_SERVER['argc'] > 0 && is_numeric($_SERVER['argc']))));
+		$config->modal = empty($_GET['modal']) ? false : abs((int) $_GET['modal']); 
 		
 		$version = self::versionMajor . "." . self::versionMinor . "." . self::versionRevision; 
 		$config->version = $version;
@@ -741,15 +743,19 @@ class ProcessWire extends Wire {
 	 * @param array $options Options to modify default behaviors (experimental): 
 	 *  - `siteDir` (string): Name of "site" directory in $rootPath that contains site's config.php, no slashes (default="site").
 	 * @return Config
+	 * @throws WireException
 	 * 
 	 */
 	public static function buildConfig($rootPath, $rootURL = null, array $options = array()) {
 		
+		if(strpos($rootPath, '..') !== false) {
+			$rootPath = realpath($rootPath);
+			if($rootPath === false) throw new WireException("Path not found"); 
+		}
+		
 		if(DIRECTORY_SEPARATOR != '/') {
 			$rootPath = str_replace(DIRECTORY_SEPARATOR, '/', $rootPath);
 		}
-
-		if(strpos($rootPath, '..') !== false) $rootPath = realpath($rootPath);
 		
 		$httpHost = '';
 		$scheme = '';
@@ -779,7 +785,7 @@ class ProcessWire extends Wire {
 			$testDir = array_pop($parts);
 			if(($testDir === $siteDir || strpos($testDir, 'site-') === 0) && is_file("$rootPath/config.php")) {
 				// rootPath was given as a /site/ directory rather than root directory
-				$rootPath = '/' . implode('/', $parts); // remove siteDir from rootPath
+				$rootPath = implode('/', $parts); // remove siteDir from rootPath
 				$siteDir = $testDir; // set proper siteDir
 			}
 		} 
@@ -802,7 +808,7 @@ class ProcessWire extends Wire {
 			unset($sf, $f, $x);
 		
 			// when internal is true, we are not being called by an external script
-			$cfg['internal'] = $realIndexFile == $realScriptFile;
+			$cfg['internal'] = strtolower($realIndexFile) == strtolower($realScriptFile);
 
 		} else {
 			// when included from another app or command line script

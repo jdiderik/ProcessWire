@@ -49,6 +49,9 @@
  * @property string $subfieldIdentifier ...
  * @property string $groupIdentifier (1)
  * @property int $maxUsers [20] Maximum number of users selectable. If more than regular text input used rather than select.
+ * @property string $selectClass
+ * @property string $inputClass
+ * @property string $checkboxClass
  *
  *
  */
@@ -132,6 +135,13 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 	protected $initTemplate = null;
 
 	/**
+	 * Has the ready method been called?
+	 * @var bool
+	 * 
+	 */
+	protected $isReady = false;
+
+	/**
 	 * Variable names that should be picked up through the session each time
 	 *
 	 */
@@ -144,6 +154,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		'allowSubfieldGroups',
 		'allowModifiers',
 		'allowAddRemove',
+		'showFieldLabels',
 		'fieldsWhitelist',
 		'dateFormat',
 		'datePlaceholder',
@@ -201,7 +212,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		$this->setting('timeFormat', $this->_('H:i')); // time format
 		$this->setting('timePlaceholder', $this->_('hh:mm')); // time format placeholder (what users see)
 		$this->setting('maxUsers', 20); // text input rather than select used when useres qty is greater than this
-		
+
 		parent::__construct();
 	}
 
@@ -246,6 +257,21 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 	 * 
 	 */
 	public function ready() {
+		
+		if($this->isReady) return;
+		$this->isReady = true;
+
+		// settings specified in $config->InputfieldSelector 
+		$configDefaults = array(
+			'selectClass' => '',
+			'inputClass' => '',
+			'checkboxClass' => '',
+		);
+		$configSettings = $this->wire('config')->InputfieldSelector;
+		$configSettings = is_array($configSettings) ? array_merge($configDefaults, $configSettings) : $configDefaults;
+		foreach($configSettings as $key => $value) {
+			$this->setting($key, $value);
+		}
 
 		$input = $this->wire('input'); 
 		$name = $input->get('name'); 
@@ -259,12 +285,13 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		if(!$this->wire('user')->isLoggedin()) return;
 
 		$this->set('initValue', $this->sessionGet('initValue')); 
-		$this->setup();
 		$sanitizer = $this->wire('sanitizer'); 
 		
 		foreach($this->sessionVarNames as $key) {
 			$this->set($key, $this->sessionGet($key));
 		}
+		
+		$this->setup();
 
 		if($action == 'field') { 
 			$out = $this->renderSelectField(); 
@@ -405,7 +432,8 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 				),
 			'title' => array(
 				'input' => 'text',
-				'label' => ($titleField ? $titleField->getLabel() : 'Title')
+				'label' => ($titleField ? $titleField->getLabel() : 'Title'),
+				'operators' => $this->operatorsByType['text']
 				), 
 			'id' => array(
 				'input' => 'number',
@@ -899,7 +927,8 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		$outSections['adjust'] = "<option data-labels='$dataLabels' data-names='$dataNames' value='toggle-names-labels'>$dataDefault</option>";
 			
 		$inputName = $this->attr('name') . "__" . $settings['name'] . "[]";
-		$out = "<select class='select-$settings[name]' name='$inputName' data-type='$settings[type]' data-selected='$selectedValue'><option></option>";
+		$selectClass = trim("$this->selectClass select-$settings[name]"); 
+		$out = "<select class='$selectClass' name='$inputName' data-type='$settings[type]' data-selected='$selectedValue'><option></option>";
 
 		if(!$this->showOptgroups) {
 			ksort($outAll);
@@ -1048,7 +1077,8 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		}
 
 		$disabled = count($operators) ? "" : " disabled='disabled'";
-		$out = "<select$disabled class='select-operator' name='$inputName'>";
+		$selectClass = trim("$this->selectClass select-operator"); 
+		$out = "<select$disabled class='$selectClass' name='$inputName'>";
 
 		foreach($operators as $key => $label) {
 			if(isset($this->operators[$label])) {
@@ -1103,7 +1133,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		$inputfield = null;
 		if(strpos($fieldName, '.') !== false) list($fieldName, $subfield) = explode('.', $fieldName); 
 
-		if(isset($this->systemFields[$fieldName])) {
+		if(isset($this->systemFields[$fieldName]) && !$subfield) {
 			// system field
 			$info = $this->systemFields[$fieldName];
 			if($fieldName == 'parent' && $this->initTemplate) {
@@ -1127,7 +1157,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 			}
 
 		} else if(isset($this->modifierFields[$fieldName])) { 
-			// modified field
+			// modifier field
 			$info = $this->modifierFields[$fieldName]; 
 			$type = $info['input'];
 			if(isset($info['options'])) $options = $info['options'];
@@ -1139,14 +1169,20 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		} else if($type == 'selector') {
 			// selector field: do nothing here but skip it, and respond to it further down
 
-		} else if($field = $this->wire('fields')->get($fieldName)) { 
+		} else if(($fieldName == 'parent' && $subfield) || $field = $this->wire('fields')->get($fieldName)) { 
 			/** @var Field $field */
-			// custom field
-			$selectorInfo = $this->getSelectorInfo($field); 
+			// custom field or parent with subfield
+			$selectorInfo = $this->getSelectorInfo($field);
 			
-			if(count($selectorInfo)) {
-				// information available for custom field
-				if($subfield && isset($selectorInfo['subfields'][$subfield])) $selectorInfo = $selectorInfo['subfields'][$subfield]; 
+			if(count($selectorInfo) || $fieldName == 'parent') {
+				// information available for custom field or parent
+				if($fieldName == 'parent') {
+					// if parent, there is a subfield, and $field becomes the subfield
+					$selectorInfo = $this->getSelectorInfo($subfield);
+					$field = $this->wire('fields')->get($subfield);
+				} else if($subfield && isset($selectorInfo['subfields'][$subfield])) {
+					$selectorInfo = $selectorInfo['subfields'][$subfield]; 
+				}
 				$type = $selectorInfo['input']; 
 
 				if($type == 'page') {
@@ -1261,13 +1297,22 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		if(in_array($type, array('select', 'page', 'checkbox'))) { 
 			// render a <select> box for the value
 
-			$out .= "<select class='select-value input-value' name='$inputName'>";
+			$selectClass = trim("$this->selectClass select-value input-value"); 
+			$out .= "<select class='$selectClass' name='$inputName'>";
 			$out .= "<option value=''></option>";
 			
 			if($type != 'checkbox' && !isset($this->systemFields[$fieldName]) && !isset($this->modifierFields[$fieldName])) {
 				// allow for a "None" option to find pages that have no selections for the field
-				$selected = $selectedValue == '""' ? ' selected' : '';
-				$out .= "<option$selected value='\"\"'>" . $this->_('None') . "</option>";
+				$none = '0';
+				foreach($options as $value => $label) {
+					// if select is using "0" as a literal selectable value, don't consider it as "None"
+					if($value === 0 || $value === '0') {
+						$none = '""';
+						break;
+					}
+				}
+				$selected = $selectedValue == $none || $selectedValue == '""' ? ' selected' : '';
+				$out .= "<option$selected value='$none'>" . $this->_('None') . "</option>";
 			}
 		
 			// render each option
@@ -1296,16 +1341,19 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 				}
 			}
 			$out .= "<input value='$selectedValueEntities' class='input-value' name='$inputName' type='hidden' />";
-			$out .= "<input value='$selectedValueTitle' class='input-value-autocomplete' name='autocomplete_$inputName' placeholder='$placeholder' type='text' />";
+			$inputClass = trim("$this->inputClass input-value-autocomplete"); 
+			$out .= "<input value='$selectedValueTitle' class='$inputClass' name='autocomplete_$inputName' placeholder='$placeholder' type='text' />";
 
 		} else if($type == 'datetime' || $type == 'date') {
 			// render date/datetime input
-			$out .= $this->renderDateInput($inputName, $selectedValue, $type == 'datetime'); 
+			$useTime = $type == 'datetime';
+			if(!$useTime && $field && $field->get('timeInputFormat')) $useTime = true; 
+			$out .= $this->renderDateInput($inputName, $selectedValue, $useTime); 
 
 		} else {
 			// render other input that uses an <input type='text'> whether text, number or selector
 			$inputType = $type; 
-			$inputClass = "input-value input-value-$type";
+			$inputClass = trim("$this->inputClass input-value input-value-$type");
 			
 			if($type == 'number' || $type == 'selector' || $fieldName == 'id' || $subfield == 'id') {
 				// adding this class tells InputfieldSelector.js that selector strings are allowed for this input
@@ -1319,7 +1367,8 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		// end the opval row by rendering a checkbox for the OR option
 		$orLabel = $this->_('Check box to make this row OR rather than AND');
 		$orChecked = $orChecked ? ' checked' : '';
-		$out .= "<input$orChecked class='input-or' type='checkbox' name='or_$inputName' value='1' title='$orLabel' />";
+		$checkboxClass = trim("$this->checkboxClass input-or"); 
+		$out .= "<input$orChecked class='$checkboxClass' type='checkbox' name='or_$inputName' value='1' title='$orLabel' />";
 
 		return $out; 
 	}
@@ -1336,7 +1385,6 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 	protected function renderDateInput($name, $value, $useTime = false) {
 		$inputfield = $this->wire('modules')->get('InputfieldDatetime'); 
 		$inputfield->attr('name', $name); 
-		$inputfield->attr('value', $value); 
 		$inputfield->datepicker = InputfieldDatetime::datepickerFocus; 
 		$inputfield->placeholder = $this->datePlaceholder; 
 		$inputfield->dateInputFormat = $this->dateFormat; 
@@ -1345,6 +1393,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 			$inputfield->timeInputFormat = $this->timeFormat;
 			$inputfield->placeholder .= ' ' . $this->timePlaceholder;
 		}
+		$inputfield->attr('value', $value); 
 		$inputfield->renderReady();
 		return $inputfield->render();
 	}
@@ -1390,7 +1439,8 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		$inputName = $this->attr('name') . "__" . $field->name . "[]"; 
 	
 		$outSub = ''; // subselector optgroup output
-		$out = "<select class='select-subfield' name='$inputName' data-type='$selectorInfo[input]'>";
+		$selectClass = trim("$this->selectClass select-subfield"); 
+		$out = "<select class='$selectClass' name='$inputName' data-type='$selectorInfo[input]'>";
 		$out .= "<option></option>";
 	
 		// determine if there is a current value string and if it contains a selector string
@@ -1489,6 +1539,8 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 			} else {
 				$selector .= (int) $field->get('template_id'); 
 			}
+			$templateIDs = $field->get('template_ids');
+			if(is_array($templateIDs) && count($templateIDs)) $selector .= "|" . implode('|', $templateIDs);
 		}
 
 		if(empty($selector)) {
@@ -1686,6 +1738,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 	 * 
 	 */
 	public function ___render() {
+		$this->ready();
 		// tell jQuery UI we want it to load the modal component which makes a.modal open modal windows
 		$this->wire('modules')->get('JqueryUI')->use('modal'); 
 
@@ -1788,7 +1841,8 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 					$operator = $selector->operator;
 					// convert to not operator when finding a not selector
 					if($selector->not && isset($this->operators["!$selector->operator"])) $operator = "!$selector->operator";
-					$opval = $this->renderOpval(($field2 ? $field2 : $field1), '', $operator, $value, $orChecked); 
+					//$opval = $this->renderOpval(($field2 ? $field2 : $field1), '', $operator, $value, $orChecked);
+					$opval = $this->renderOpval($field, '', $operator, $value, $orChecked); 
 					$rows .= $this->renderRow($select, $select2, $opval, $rowClass); 			
 				}
 			}

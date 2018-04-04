@@ -20,12 +20,12 @@ function InputfieldRepeater($) {
 	var depthSize = 50;
 
 	/**
-	 * Whether or not AdminThemeReno is present
+	 * Whether or not AdminThemeDefault is present
 	 * 
 	 * @type {bool}
 	 * 
 	 */
-	var isReno = $('body').hasClass('AdminThemeReno');
+	var isAdminDefault = $('body').hasClass('AdminThemeDefault');
 
 	/**
 	 * Event timer for double clicks
@@ -48,7 +48,7 @@ function InputfieldRepeater($) {
 			if(source == 'InputfieldRepeaterItemEdit' || source == 'InputfieldRepeaterItemAdd') {
 				event.stopPropagation();
 				var $r = $(this).find(".InputfieldRepeater");
-				if($r.length) initRepeater($r);
+				if($r.length) $r.each(function() { initRepeater($(this)) });
 				return;
 			}
 		}
@@ -174,7 +174,8 @@ function InputfieldRepeater($) {
 				$input.val('-1');
 			} else {
 				$this.removeClass(toggleOff).addClass(toggleOn);
-				$item.removeClass('InputfieldRepeaterUnpublished InputfieldRepeaterOff');
+				$item.removeClass('InputfieldRepeaterUnpublished InputfieldRepeaterOff')
+					.addClass('InputfieldRepeaterWasUnpublished');
 				$input.val('1');
 			}
 			checkMinMax($item.closest('.InputfieldRepeater'));
@@ -221,6 +222,9 @@ function InputfieldRepeater($) {
 		var ajaxURL = ProcessWire.config.InputfieldRepeater.editorUrl + '?id=' + pageID + '&field=' + fieldName + '&repeater_edit=' + itemID;
 		var $spinner = $item.find('.InputfieldRepeaterDrag');
 		var $inputfields = $loaded.closest('.Inputfields');
+		
+		if($repeater.hasClass('InputfieldRenderValueMode')) ajaxURL += '&inrvm=1';
+		if($repeater.hasClass('InputfieldNoDraft')) ajaxURL += '&nodraft=1';	
 
 		$spinner.removeClass('fa-arrows').addClass('fa-spin fa-spinner');
 		repeaterID = repeaterID.replace(/_repeater\d+$/, '');
@@ -235,7 +239,7 @@ function InputfieldRepeater($) {
 			$item.removeClass('InputfieldRepeaterItemLoading');
 			InputfieldsInit($inputfields);
 
-			var $repeaters = $inputs.filter('.InputfieldRepeater');
+			var $repeaters = $inputs.find('.InputfieldRepeater');
 			if($repeaters.length) $repeaters.each(function() {
 				initRepeater($(this));
 			});
@@ -321,7 +325,7 @@ function InputfieldRepeater($) {
 		}
 
 		// determine which page IDs we don't accept for new items (because we already have them rendered)
-		var $unpublishedItems = $inputfields.find('.InputfieldRepeaterUnpublished:not(.InputfieldRepeaterMinItem)');
+		var $unpublishedItems = $inputfields.find('.InputfieldRepeaterUnpublished, .InputfieldRepeaterWasUnpublished'); // :not(.InputfieldRepeaterMinItem)');
 		if($unpublishedItems.length) {
 			ajaxURL += '&repeater_not=';
 			$unpublishedItems.each(function() {
@@ -445,7 +449,7 @@ function InputfieldRepeater($) {
 	}
 
 	/**
-	 * Given an InputfieldRepeaterItem update the label consistent with any present formatting sting
+	 * Given an InputfieldRepeaterItem update the label consistent with any present formatting string
 	 * 
 	 * Primarily adjusts item count(s) and allowed for {secondary} text appearance
 	 * 
@@ -495,9 +499,6 @@ function InputfieldRepeater($) {
 		var prevDepth = parseInt($depth.val());
 		var left = ui.position.left;
 	
-		// AdminThemeReno has something different going on with the left positions, so we adjust for that here
-		if(isReno) left -= depthSize;
-		
 		if(left < 0) {
 			depth = prevDepth - Math.round(Math.abs(left) / depthSize);
 			// console.log('decrease depth to: ' + depth);
@@ -551,6 +552,7 @@ function InputfieldRepeater($) {
 				$item.css('margin-left', targetLeft + 'px');
 			}
 		});
+		$inputfieldRepeater.children('.InputfieldContent').css('position', 'relative');
 	}
 
 	/**
