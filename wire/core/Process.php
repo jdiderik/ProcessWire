@@ -23,14 +23,15 @@
  * @method Process headline(string $headline)
  * @method Process browserTitle(string $title)
  * @method Process breadcrumb(string $href, string $label)
- * @method install()
- * @method uninstall()
- * @method upgrade($fromVersion, $toVersion)
+ * @method void install()
+ * @method void uninstall()
+ * @method void upgrade($fromVersion, $toVersion)
  * @method Page installPage($name = '', $parent = null, $title = '', $template = 'admin', $extras = array()) #pw-internal
  * @method int uninstallPage() #pw-internal
  * @method string executeNavJSON(array $options = array()) #pw-internal @todo
- * @method ready()
- * @method setConfigData(array $data)
+ * @method void ready()
+ * @method void setConfigData(array $data)
+ * @method void executed($methodName) Hook called after a method has been executed in the Process
  *
  */
 
@@ -557,5 +558,20 @@ abstract class Process extends WireData implements Module {
 	 */
 	public function getViewVars() {
 		return $this->_viewVars; 
+	}
+
+	/**
+	 * Return the Page that this process lives on 
+	 * 
+	 * @return Page|NullPage
+	 * 
+	 */
+	public function getProcessPage() {
+		$page = $this->wire('page'); 
+		if($page->process === $this) return $page;
+		$moduleID = $this->wire('modules')->getModuleID($this);
+		if(!$moduleID) return new NullPage();
+		$page = $this->wire('pages')->get("process=$moduleID, include=all"); 
+		return $page;
 	}
 }

@@ -29,13 +29,13 @@
  * @method bool saveField(Page $page, $field, array $options = array()) Save just the named field from $page. Same as: $page->save('field') #pw-group-manipulation
  * @method bool trash(Page $page, $save = true) Move a page to the trash. If you have already set the parent to somewhere in the trash, then this method won't attempt to set it again. #pw-group-manipulation
  * @method bool restore(Page $page, $save = true) Restore a trashed page to its original location. #pw-group-manipulation
- * @method int emptyTrash() Empty the trash and return number of pages deleted. #pw-group-manipulation
+ * @method int|array emptyTrash(array $options = array()) Empty the trash and return number of pages deleted. #pw-group-manipulation
  * @method bool delete(Page $page, $recursive = false, array $options = array()) Permanently delete a page and it's fields. Unlike trash(), pages deleted here are not restorable. If you attempt to delete a page with children, and don't specifically set the $recursive param to True, then this method will throw an exception. If a recursive delete fails for any reason, an exception will be thrown. #pw-group-manipulation
  * @method Page|NullPage clone(Page $page, Page $parent = null, $recursive = true, $options = array()) Clone an entire page, it's assets and children and return it. #pw-group-manipulation
  * @method Page|NullPage add($template, $parent, $name = '', array $values = array()) #pw-group-manipulation
  * @method int sort(Page $page, $value = false) Set the “sort” value for given $page while adjusting siblings, or re-build sort for its children. #pw-group-manipulation
  * @method setupNew(Page $page) Setup new page that does not yet exist by populating some fields to it. #pw-internal
- * @method string setupPageName(Page $page, array $options = []) Determine and populate a name for the given page. #pw-internal
+ * @method string setupPageName(Page $page, array $options = array()) Determine and populate a name for the given page. #pw-internal
  * @method void insertBefore(Page $page, Page $beforePage) Insert one page as a sibling before another. #pw-advanced
  * @method void insertAfter(Page $page, Page $afterPage) Insert one page as a sibling after another. #pw-advanced
  * 
@@ -121,6 +121,12 @@ class Pages extends Wire {
 	 * 
 	 */
 	protected $editor;
+
+	/**
+	 * @var PagesNames
+	 * 
+	 */
+	protected $names;
 
 	/**
 	 * @var PagesLoaderCache
@@ -613,13 +619,14 @@ class Pages extends Wire {
 	 * 
 	 * #pw-group-manipulation
 	 *
-	 * @return int Returns total number of pages deleted from trash.
+	 * @param array $options See PagesTrash::emptyTrash() for advanced options
+	 * @return int|array Returns total number of pages deleted from trash, or array if verbose option specified.
 	 * 	This number is negative or 0 if not all pages could be deleted and error notices may be present.
 	 * @see Pages::trash(), Pages::restore()
 	 *
 	 */
-	public function ___emptyTrash() {
-		return $this->trasher()->emptyTrash();
+	public function ___emptyTrash(array $options = array()) {
+		return $this->trasher()->emptyTrash($options);
 	}
 	
 	/**
@@ -1224,6 +1231,7 @@ class Pages extends Wire {
 	 * @param array $options Optionally specify array of any of the following:
 	 *   - `pageClass` (string): Class to use for Page object (default='Page').
 	 *   - `template` (Template|id|string): Template to use. 
+	 *   - Plus any other Page properties or fields you want to set at this time
 	 * @return Page
 	 *
 	 */
@@ -1242,9 +1250,16 @@ class Pages extends Wire {
 		} else {
 			$template = null;
 		}
+		
 		$class = wireClassName($class, true);
 		$page = $this->wire(new $class($template));
 		if(!$page instanceof Page) $page = $this->wire(new Page($template));
+		
+		unset($options['pageClass'], $options['template']); 
+		foreach($options as $name => $value) {
+			$page->set($name, $value);
+		}
+		
 		return $page;
 	}
 
@@ -1334,6 +1349,17 @@ class Pages extends Wire {
 	public function editor() {
 		if(!$this->editor) $this->editor = $this->wire(new PagesEditor($this));
 		return $this->editor;
+	}
+	
+	/**
+	 * @return PagesNames
+	 *
+	 * #pw-internal
+	 *
+	 */
+	public function names() {
+		if(!$this->names) $this->names = $this->wire(new PagesNames($this)); 
+		return $this->names;
 	}
 
 	/**

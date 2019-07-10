@@ -23,6 +23,7 @@
  * @method void init() Initialize session (called automatically by constructor) #pw-hooker
  * @method bool authenticate(User $user, $pass) #pw-hooker
  * @method bool isValidSession($userID) #pw-hooker
+ * @method bool allowLoginAttempt($name) #pw-hooker
  * @method bool allowLogin($name, User $user = null) #pw-hooker
  * @method void loginSuccess(User $user) #pw-hooker
  * @method void loginFailure($name, $reason) #pw-hooker
@@ -618,6 +619,18 @@ class Session extends Wire implements \IteratorAggregate {
 	}
 
 	/**
+	 * Remove all session variables in given namespace
+	 * 
+	 * @param string|object $ns
+	 * @return $this
+	 * 
+	 */
+	public function removeAllFor($ns) {
+		$this->remove($ns, true); 
+		return $this;
+	}
+
+	/**
 	 * Given a namespace object or string, return the namespace string
 	 * 
 	 * @param object|string $ns
@@ -714,10 +727,23 @@ class Session extends Wire implements \IteratorAggregate {
 		} else {
 			$ip = $_SERVER['REMOTE_ADDR']; 
 		}
-
-		// sanitize by converting to and from integer
-		$ip = ip2long($ip);
-		if(!$int) $ip = long2ip($ip);
+		
+		if($useClient === 2 && strpos($ip, ',') !== false) {
+			// return multiple IPs
+			$ips = explode(',', $ip);
+			foreach($ips as $key => $ip) {
+				$ip = ip2long(trim($ip));
+				if(!$int) $ip = long2ip($ip);
+				$ips[$key] = $ip;
+			}
+			$ip = implode(',', $ips);
+			
+		} else {
+			// sanitize by converting to and from integer
+			$ip = ip2long(trim($ip));
+			if(!$int) $ip = long2ip($ip);
+		}
+		
 		return $ip;
 	}
 
@@ -768,11 +794,16 @@ class Session extends Wire implements \IteratorAggregate {
 		
 		if(!strlen($name)) return null;
 		
-		if(is_null($user)) {
+		$allowAttempt = $this->allowLoginAttempt($name); 
+		
+		if($allowAttempt && is_null($user)) {
 			$user = $users->get('name=' . $sanitizer->selectorValue($name));
 		}
+		
+		if(!$allowAttempt) {
+			$failReason = 'Blocked login attempt';
 
-		if(!$user || !$user->id) {
+		} else if(!$user || !$user->id) {
 			$failReason = 'Unknown user';
 			
 		} else if($user->id == $guestUserID) {
@@ -881,8 +912,9 @@ class Session extends Wire implements \IteratorAggregate {
 		if(!$user || !$user instanceof User) {
 			$name = $this->wire('sanitizer')->pageNameUTF8($name);
 			$user = $this->wire('users')->get("name=" . $this->wire('sanitizer')->selectorValue($name));
-			if(!$user || !$user->id) return false;
 		}
+		if(!$user || !$user->id || !$user instanceof User) return false;
+		if($user->isGuest()) return false;
 		$xroles = $this->wire('config')->loginDisabledRoles;
 		if(!is_array($xroles) && !empty($xroles)) $xroles = array($xroles);
 		if($name) {}
@@ -899,6 +931,21 @@ class Session extends Wire implements \IteratorAggregate {
 			}
 		}
 		return $allow; 
+	}
+
+	/**
+	 * Allow login attempt for given name at all?
+	 * 
+	 * This method does nothing and is purely for hooks to modify return value. 
+	 * 
+	 * #pw-hooker
+	 * 
+	 * @param string $name
+	 * @return bool
+	 * 
+	 */
+	public function ___allowLoginAttempt($name) {
+		return strlen($name) > 0;
 	}
 
 	/**
@@ -1152,7 +1199,13 @@ class Session extends Wire implements \IteratorAggregate {
 				end($history);
 				$lastKey = key($history);
 				$nextKey = $lastKey+1;
-				if($cnt >= $historyCnt) $history = array_slice($history, -1 * ($historyCnt-1), null, true); 
+				if($cnt >= $historyCnt) { 
+					if($historyCnt > 1) {
+						$history = array_slice($history, -1 * ($historyCnt - 1), null, true);
+					} else {
+						$history = array();
+					}
+				}
 			} else {
 				$nextKey = 0;
 			}

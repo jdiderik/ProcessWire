@@ -142,6 +142,25 @@ $config->useFunctionsAPI = false;
  */
 $config->useMarkupRegions = false;
 
+/**
+ * Disable all HTTPS requirements?
+ * 
+ * Use this option only for development or staging environments, on sites where you are 
+ * otherwise requiring HTTPS. By setting this option to something other than false, you
+ * can disable any HTTPS requirements specified per-template, enabling you to use your 
+ * site without SSL during development or staging, etc.
+ * 
+ * The following options are available:
+ * - boolean true: Disable HTTPS requirements globally
+ * - string containing hostname: Disable HTTPS requirements only for specified hostname.
+ * - array containing hostnames: Disable HTTPS requirements for specified hostnames. 
+ * 
+ * @var bool|string|array
+ *
+ */
+$config->noHTTPS = false;
+
+
 
 /*** 2. DATES & TIMES *************************************************************************/
 
@@ -788,6 +807,16 @@ $config->pageNameCharset = 'ascii';
 $config->pageNameWhitelist = '-_.abcdefghijklmnopqrstuvwxyz0123456789æåäßöüđжхцчшщюяàáâèéëêěìíïîõòóôøùúûůñçčćďĺľńňŕřšťýžабвгдеёзийклмнопрстуфыэęąśłżź';
 
 /**
+ * Name to use for untitled pages
+ * 
+ * When page has this name, the name will be changed automatically (to a field like title) when it is possible to do so.
+ * 
+ * @var string
+ * 
+ */
+$config->pageNameUntitled = "untitled";
+
+/**
  * Maximum paginations
  *
  * Maxmum number of supported paginations when using page numbers.
@@ -812,10 +841,54 @@ $config->maxPageNum = 999;
  */
 $config->wireInputOrder = 'get post';
 
-
+/**
+ * Lazy-load get/post/cookie input into $input API var?
+ * 
+ * This is an experimental option for reduced memory usage when a lot of input data is present. 
+ * 
+ * This prevents PW from keeping separate copies of get/post/cookie data, and it instead works
+ * directly from the PHP $_GET, $_POST and $_COOKIE vars.
+ * 
+ * This option is also useful in that anything you SET to PW’s $input->get/post/cookie also gets
+ * set to the equivalent PHP $_GET, $_POST and $_COOKIE. 
+ * 
+ * @var bool
+ * 
+ */
+$config->wireInputLazy = false;
 
 
 /*** 7. DATABASE ********************************************************************************/
+
+/**
+ * Database name
+ *
+ */
+$config->dbName = '';
+
+/**
+ * Database username
+ *
+ */
+$config->dbUser = '';
+
+/**
+ * Database password
+ *
+ */
+$config->dbPass = '';
+
+/**
+ * Database host
+ *
+ */
+$config->dbHost = '';
+
+/**
+ * Database port
+ *
+ */
+$config->dbPort = 3306;
 
 /**
  * Database character set
@@ -870,30 +943,6 @@ $config->dbPath = '';
  * 
  */
 $config->dbLowercaseTables = true;
-
-/**
- * Database username
- * 
- */
-$config->dbUser = '';
-
-/**
- * Database password
- * 
- */
-$config->dbPass = '';
-
-/**
- * Database host
- * 
- */
-$config->dbHost = '';
-
-/**
- * Database port
- * 
- */
-$config->dbPort = 3306;
 
 /**
  * Database init command (PDO::MYSQL_ATTR_INIT_COMMAND)
@@ -1021,6 +1070,7 @@ $config->substituteModules = array(
  * #property string module Name of WireMail module to use or blank to auto-detect. (default='')
  * #property string from Default from email address, when none provided at runtime. (default=$config->adminEmail)
  * #property string fromName Default from name string, when none provided at runtime. (default='')
+ * #property string newline What to use for newline if different from RFC standard of "\r\n" (optional). 
  * #property array headers Default additional headers to send in email, key=value. (default=[])
  * 
  * @var array
@@ -1312,9 +1362,17 @@ $config->versionName = '';
  * Value is null, 0, or 1 or higher. This should be kept at null in this file. 
  *
  */
-$config->inputfieldColumnWidthSpacing = null; 
+$config->inputfieldColumnWidthSpacing = null;
 
-
+/**
+ * Populated to contain <link rel='next|prev'.../> tags for document head
+ * 
+ * This is populated only after a MarkupPagerNav::render() has rendered pagination and is
+ * otherwise null. 
+ *
+ * $config->pagerHeadTags = '';
+ * 
+ */
 
 /*** 11. SYSTEM *********************************************************************************
  * 

@@ -77,12 +77,14 @@
  * 
  * @property string $pageNameCharset Character set for page names, must be 'ascii' (default, lowercase) or 'UTF8' (uppercase). #pw-group-URLs
  * @property string $pageNameWhitelist Whitelist of characters allowed in UTF8 page names. #pw-group-URLs
+ * @property string $pageNameUntitled Name to use for untitled pages (default="untitled"). #pw-group-URLs
  * @property string $pageNumUrlPrefix Prefix used for pagination URLs. Default is "page", resulting in "/page1", "/page2", etc. #pw-group-URLs
  * @property array $pageNumUrlPrefixes Multiple prefixes that may be used for detecting pagination (internal use, for multi-language) #pw-group-URLs
  * @property int $maxUrlSegments Maximum number of extra stacked URL segments allowed in a page's URL (including page numbers)  #pw-group-URLs
  * @property int $maxUrlSegmentLength Maximum length of any individual URL segment (default=128). #pw-group-URLs
  * @property int $maxUrlDepth Maximum URL/path slashes (depth) for request URLs. (Min=10, Max=60) #pw-group-URLs
  * @property string $wireInputOrder Order that variables with the $input API var are handled when you access $input->var. #pw-group-HTTP-and-input
+ * @property bool $wireInputLazy Specify true for $input API var to load input data in a lazy fashion and potentially use less memory. Default is false. #pw-group-HTTP-and-input
  * 
  * @property bool $advanced Special mode for ProcessWire system development. Not recommended for regular site development or production use. #pw-group-system
  * @property bool $demo Special mode for demonstration use that causes POST requests to be disabled. Applies to core, but may not be safe with 3rd party modules. #pw-group-system
@@ -95,6 +97,7 @@
  * @property array $adminThumbOptions Admin thumbnail image options #pw-group-images
  * @property array $httpHosts HTTP hosts For added security, specify the host names ProcessWire should recognize. #pw-group-HTTP-and-input
  * @property int $maxPageNum Maximum number of recognized paginations #pw-group-URLs
+ * @property bool|string|array $noHTTPS When boolean true, pages requiring HTTPS will not enforce it (useful for dev environments). May also specify hostname (string) or hostnames (array) to disable HTTPS for. #pw-group-HTTP-and-input
  * 
  * @property string $dbHost Database host #pw-group-database
  * @property string $dbName Database name #pw-group-database
@@ -123,6 +126,7 @@
  * 
  * @property array $substituteModules Associative array with names of substitute modules for when requested module doesn't exist #pw-group-modules
  * @property array $logs Additional core logs to keep #pw-group-admin
+ * @property bool $logIP Include IP address in logs, when applicable? #pw-group-admin
  * @property string $defaultAdminTheme Default admin theme: AdminThemeDefault or AdminThemeReno #pw-group-admin
  * @property string $fatalErrorHTML HTML used for fatal error messages in HTTP mode. #pw-group-system
  * @property array $modals Settings for modal windows #pw-group-admin
@@ -142,6 +146,7 @@
  * @property string $versionName This is automatically populated with the current PW version name (i.e. 2.5.0 dev) #pw-group-runtime
  * @property int $inputfieldColumnWidthSpacing Used by some admin themes to commmunicate to InputfieldWrapper at runtime. #pw-internal
  * @property bool $debugMarkupQA Set to true to make the MarkupQA class report verbose debugging messages (to superusers). #pw-internal
+ * @property string|null $pagerHeadTags Populated at runtime to contain `<link rel=prev|next />` tags for document head, after pagination has been rendered by MarkupPagerNav module. #pw-group-runtime 
  * 
  * @property int $rootPageID Page ID of homepage (usually 1) #pw-group-system-IDs
  * @property int $adminRootPageID Page ID of admin root page #pw-group-system-IDs
@@ -401,6 +406,46 @@ class Config extends WireData {
 		}
 		
 		return $this;
+	}
+
+	/**
+	 * Return true if current PHP version is equal to or newer than the given version 
+	 * 
+	 * ~~~~~
+	 * if($config->phpVersion('7.0.0')) {
+	 *   // PHP version is 7.x
+	 * }
+	 * ~~~~~
+	 * 
+	 * @param string|null $minVersion
+	 * @return bool
+	 * @since 3.0.101
+	 * 
+	 */
+	public function phpVersion($minVersion) {
+		return version_compare(PHP_VERSION, $minVersion) >= 0;
+	}
+
+	/**
+	 * Check if current ProcessWire version is equal to or newer than given versino
+	 * 
+	 * If no version argument is given, it simply returns the current ProcessWire version. 
+	 * 
+	 * ~~~~~
+	 * if($config->version('3.0.100')) {
+	 *   // ProcessWire version is 3.0.100 or newer
+	 * }
+	 * ~~~~~
+	 * 
+	 * @param string $minVersion Specify version string if you want to compare against current version
+	 * @return bool|string Returns current version if no argument given, OR boolean if given a version argument: 
+	 *  - If given version is older than current, returns false.
+	 *  - If given version is equal to or newer than current, returns true.
+	 * @since 3.0.106
+	 * 
+	 */
+	public function version($minVersion = '') {
+		return version_compare($this->version, $minVersion) >= 0;
 	}
 }
 

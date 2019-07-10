@@ -9,7 +9,7 @@
  * @property bool $isSuperuser
  * @property bool $isEditor
  * @property bool $isLoggedIn
- * @property bool $isModal
+ * @property bool|string $isModal
  * @property bool|int $useAsLogin
  * @method array getUserNavArray()
  *
@@ -657,6 +657,7 @@ abstract class AdminThemeFramework extends AdminTheme {
 				// unencode + re-encode entities, just in case module already entity some or all of output
 				if(strpos($text, '&') !== false) $text = $this->sanitizer->unentities($text);
 				$text = $this->sanitizer->entities($text);
+				$text = nl2br($text);
 			}
 
 			if($notice instanceof NoticeError) {

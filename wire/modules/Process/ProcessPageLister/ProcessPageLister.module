@@ -60,12 +60,19 @@
  * @property string $blankLabel Label when a field is blank (default=Blank)
  * @property int $editOption Edit option setting, used only by ListerPro
  * @property bool $responsiveTable Whether or not Lister table should be responsive rather than horiz scroll
+ * @property bool $configMode Configuration mode where some limits are removed (default=false)
  * 
  * @method string buildListerTableColActions(Page $p, $value)
  * @method string renderResults($selector = null)
  * @method string getSelector($limit = null)
  * @method PageArray findResults($selector)
  * @method string executeReset()
+ * @method string executeEditBookmark()
+ * @method string executeViewport() ListerPro
+ * @method string executeConfig() ListerPro
+ * @method string executeActions() ListerPro
+ * @method string executeSave() ListerPro
+ * @method string renderedExtras($markup) #pw-hooker
  * 
  * 
  * @todo make system fields hookable for output like markupValue is for custom fields
@@ -248,6 +255,9 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 	
 		// whether or not table collapses (rather than horiz scroll) at lower resolutions
 		$this->set('responsiveTable', true);
+	
+		// configuration mode where some limits are removed
+		$this->set('configMode', false);
 	
 		$idLabel = $this->_('ID');
 		$pathLabel = $this->_('Path');
@@ -503,15 +513,30 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 			return $this; 
 		} else if($key == 'parent' && !$value instanceof Page) {
 			$value = $this->wire('pages')->get($value); 
+		} else if($key === 'finalSelector') {
+			$this->finalSelector = $value;
 		}
 		return parent::set($key, $value);
 	}
 
 	/**
+	 * Get a Lister setting
+	 * 
+	 * @param string $key
+	 * @return mixed|string
+	 * 
+	 */
+	public function get($key) {
+		if($key === 'finalSelector') return $this->finalSelector;
+		return parent::get($key);
+	}
+
+
+	/**
 	 * Set a Lister session variable
 	 *
 	 * @param string $key
-	 * @param string|int $value
+	 * @param string|int|array $value
 	 *
 	 */
 	public function sessionSet($key, $value) {
@@ -524,7 +549,7 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 	 * Get a Lister session variable
 	 *
 	 * @param string $key
-	 * @return string|int|null
+	 * @return string|int|array|null
 	 *
 	 */
 	public function sessionGet($key) {
@@ -693,7 +718,7 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 	protected function allowColumnField(Field $field) {
 	
 		if(in_array($field->name, $this->disallowColumns)) return false;
-		if(count($this->limitFields) && !in_array($field->name, $this->limitFields)) {
+		if(count($this->limitFields) && !$this->configMode && !in_array($field->name, $this->limitFields)) {
 			if(!in_array($field->name, $this->columns)) return false;
 		}
 		if($field->type instanceof FieldtypeFieldsetOpen) return false;
@@ -1161,7 +1186,7 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 	 * @param Page $p
 	 * @param array $fields
 	 * @param string $name
-	 * @param mixed $value
+	 * @param mixed $value Not used at present 
 	 * @return string
 	 *
 	 */
@@ -1174,17 +1199,17 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 		
 		reset($fields); 
 		$isFirstCol = key($fields) == $name; 
+		$value = $p->getFormatted($name); 
 		
 		if($subname && $name == 'parent') {
 			// if parent and subname present, focus on just the subname value
-			if($value instanceof Page) $value = $value->getUnformatted($subname);
+			if($value instanceof Page) $value = $value->getFormatted($subname);
 			$name = $subname;
 			$subname = '';
 		}
 
 		/** @var Field $field */
 		$field = isset($fields[$name]) ? $fields[$name] : $this->wire('fields')->get($name);
-		if(is_null($value)) $value = $p->getUnformatted($name);
 		$delimiter = isset($this->delimiters[$fullname]) ? $this->delimiters[$fullname] : "<br />";
 		
 		if(!$subname && ($value instanceof Page || $value instanceof PageArray)) {
@@ -1292,7 +1317,7 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 
 		} else if($field && $field->type instanceof FieldtypeDatetime) {
 			// datetime field
-			$value = $field->type->formatValue($p, $field, $value); 
+			// $value = $field->type->formatValue($p, $field, $value); 
 			$value = "<span class='datetime'>$value</span>";
 
 		} else if($field && $field->type instanceof FieldtypeCheckbox) {
@@ -1510,6 +1535,7 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 		if(is_null($pageListRender)) {
 			require_once($this->wire('config')->paths->ProcessPageList . 'ProcessPageListRenderJSON.php');
 			$pageListRender = $this->wire(new ProcessPageListRenderJSON($this->wire('page'), $this->wire('pages')->newPageArray())); 
+			$pageListRender->setUseTrash($this->wire('user')->isSuperuser()); 
 		}
 		
 		$actions = $pageListRender->getPageActions($p);
@@ -1805,7 +1831,8 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 			$btn->href = $this->addURL . $action;
 			$btn->showInHeader();
 			$btn->icon = 'plus-circle';
-			$out = str_replace("<a ", "<a class='$btnClass' ", $btn->render());
+			$btn->aclass = $btnClass;
+			$out = $btn->render();
 			if($this->editMode == self::windowModeBlank) $out = str_replace("<a " ,"<a target='_blank' ", $out);
 		}
 		
@@ -1814,7 +1841,7 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 
 	/**
 	 * Render additional tabs, setup so that descending classes can use as a template method
-	 *
+	 * 
 	 * @return string
 	 *
 	 */
@@ -1823,7 +1850,23 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 		$resetLabel = $this->_('Reset filters and columns to default'); 
 		$out = "<div id='ProcessListerRefreshTab' title='$refreshLabel' class='WireTab WireTabTip'></div>";
 		$out .= "<div id='ProcessListerResetTab' title='$resetLabel' class='WireTab WireTabTip'></div>";
+		$out = $this->renderedExtras($out);
 		return $out; 
+	}
+
+	/**
+	 * Called when extra tabs markup has been rendered
+	 * 
+	 * Optionally hook this if you want to modify or add additional tabs markup returned by renderExtras()
+	 * 
+	 * #pw-hooker
+	 *
+	 * @param string $markup Existing tab markup already rendered
+	 * @return string Contents of the $markup variable optionally prepended/appended with additional tab markup
+	 * 
+	 */
+	public function ___renderedExtras($markup) {
+		return $markup;
 	}
 
 	/**
@@ -1994,7 +2037,6 @@ class ProcessPageLister extends Process implements ConfigurableModule {
 		
 		return parent::___executeNavJSON($options);
 	}
-	
 
 
 	/**

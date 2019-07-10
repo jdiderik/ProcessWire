@@ -179,7 +179,7 @@ class WireUpload extends Wire {
 	public function __destruct() {
 		// cleanup files that were backed up when overwritten
 		foreach($this->overwrittenFiles as $bakDestination => $destination) {
-			if(is_file($bakDestination)) unlink($bakDestination);
+			if(is_file($bakDestination)) $this->wire('files')->unlink($bakDestination);
 		}
 	}
 
@@ -287,7 +287,21 @@ class WireUpload extends Wire {
 		$filename = rawurldecode($filename); // per #1487
 		$dir = $this->getUploadDir();
 		$tmpName = tempnam($dir, wireClassName($this, false));
-		file_put_contents($tmpName, file_get_contents('php://input')); 
+	
+		// upload without chunks:
+		// file_put_contents($tmpName, file_get_contents('php://input'));
+	
+		// upload with chunks (via @BitPoet processwire-requests#233)
+		$uploadData = fopen("php://input", "rb");
+		$saveFile = fopen($tmpName, "wb");
+		$chunkSize = 8192 * 1024; // about 8 megabytes
+		while(!feof($uploadData)) {
+			$chunk = fread($uploadData, $chunkSize); 
+			if($chunk !== false) fwrite($saveFile, $chunk);
+		}
+		fclose($saveFile);
+		fclose($uploadData);
+		
 		$filesize = is_file($tmpName) ? filesize($tmpName) : 0;
 		$error = $filesize ? UPLOAD_ERR_OK : UPLOAD_ERR_NO_FILE;
 
@@ -491,7 +505,7 @@ class WireUpload extends Wire {
 			if(!$destination || !$filename) $destination = $this->destinationPath . 'invalid-filename';
 			if(!$error) $error = "Unable to move uploaded file to: $destination";
 			$this->error($error); 
-			if(is_file($tmp_name)) @unlink($tmp_name); 
+			if(is_file($tmp_name)) $this->wire('files')->unlink($tmp_name); 
 			return false;
 		}
 
@@ -533,7 +547,7 @@ class WireUpload extends Wire {
 		} catch(\Exception $e) {
 			$this->error($e->getMessage());
 			$this->wire('files')->rmdir($tmpDir, true);
-			unlink($zipFile); 
+			$this->wire('files')->unlink($zipFile);
 			return $files;
 		}
 	
@@ -544,7 +558,7 @@ class WireUpload extends Wire {
 			$pathname = $tmpDir . $file;
 
 			if(!$this->isValidUpload($file, filesize($pathname), UPLOAD_ERR_OK)) {
-				@unlink($pathname); 
+				$this->wire('files')->unlink($pathname, $tmpDir); 
 				continue; 
 			}
 
@@ -574,12 +588,12 @@ class WireUpload extends Wire {
 				$this->completedFilenames[] = basename($destination); 
 				$cnt++; 
 			} else {
-				@unlink($pathname); 
+				$this->wire('files')->unlink($pathname, $tmpDir);
 			}
 		}
 
 		$this->wire('files')->rmdir($tmpDir, true); 
-		@unlink($zipFile); 
+		$this->wire('files')->unlink($zipFile);
 
 		if(!$cnt) return false; 
 		return true; 	

@@ -552,9 +552,9 @@ abstract class ImageSizerEngine extends WireData implements Module, Configurable
 		$dest = preg_replace('/\.' . $extension . '$/', '_tmp.' . $extension, $filename);
 		if(strlen($content) == @file_put_contents($dest, $content, \LOCK_EX)) {
 			// on success we replace the file
-			unlink($filename);
-			rename($dest, $filename);
-			wireChmod($filename);
+			$this->wire('files')->unlink($filename);
+			$this->wire('files')->rename($dest, $filename);
+			$this->wire('files')->chmod($filename);
 			return true;
 		} else {
 			// it was created a temp diskfile but not with all data in it
@@ -669,28 +669,28 @@ abstract class ImageSizerEngine extends WireData implements Module, Configurable
 		if($targetWidth == $originalTargetWidth && 1 + $targetWidth == $pWidth) $pWidth = $pWidth - 1;
 		if($targetHeight == $originalTargetHeight && 1 + $targetHeight == $pHeight) $pHeight = $pHeight - 1;
 
-		if(!$this->upscaling) {
-			// we are going to shoot for something smaller than the target
-
-			while($pWidth > $img['width'] || $pHeight > $img['height']) {
-				// favor the smallest dimension
-				if($pWidth > $img['width']) {
-					$pWidth = $img['width'];
-					$pHeight = $this->getProportionalHeight($pWidth);
-				}
-
-				if($pHeight > $img['height']) {
-					$pHeight = $img['height'];
-					$pWidth = $this->getProportionalWidth($pHeight);
-				}
-
-				if($targetWidth > $pWidth) $targetWidth = $pWidth;
-				if($targetHeight > $pHeight) $targetHeight = $pHeight;
-
-				if(!$this->cropping) {
-					$targetWidth = $pWidth;
-					$targetHeight = $pHeight;
-				}
+		if(!$this->upscaling && ($img['width'] < $targetWidth || $img['height'] < $targetHeight)) {
+			// via @horst-n PR #118: 
+			// upscaling is not allowed and we have one or both dimensions to small,
+			// we scale down the target dimensions to fit within the image dimensions, 
+			// with respect to the target dimensions ratio
+			$ratioSource = $img['height'] / $img['width'];
+			$ratioTarget = !$this->cropping ? $ratioSource : $targetHeight / $targetWidth;
+			if($ratioSource >= $ratioTarget) {
+				// ratio is equal or target fits into source
+				$pWidth = $targetWidth = $img['width'];
+				$pHeight = $img['height'];
+				$targetHeight = ceil($pWidth * $ratioTarget);
+			} else {
+				// target doesn't fit into source
+				$pHeight = $targetHeight = $img['height'];
+				$pWidth = $img['width'];
+				$targetWidth = ceil($pHeight / $ratioTarget);
+			}
+			if($this->cropping) {
+				// we have to disable any sharpening method here, 
+				// as the source will not be resized, only cropped
+				$this->sharpening = 'none';
 			}
 		}
 
@@ -1540,8 +1540,8 @@ abstract class ImageSizerEngine extends WireData implements Module, Configurable
 
 		// all went well, copy back the temp file, remove the temp file
 		if(!@copy($this->tmpFile, $this->filename)) return false; // fallback or failed 
-		wireChmod($this->filename);
-		@unlink($this->tmpFile);
+		$this->wire('files')->chmod($this->filename);
+		$this->wire('files')->unlink($this->tmpFile);
 
 		// post processing: IPTC, setModified and reload ImageInfo
 		$this->writeBackIPTC($this->filename, false);
@@ -1590,13 +1590,13 @@ abstract class ImageSizerEngine extends WireData implements Module, Configurable
 		if($result) {
 			// success
 			if($tmpFilename != $dstFilename) {
-				if(is_file($dstFilename)) unlink($dstFilename);
-				rename($tmpFilename, $dstFilename);
+				if(is_file($dstFilename)) $this->wire('files')->unlink($dstFilename);
+				$this->wire('files')->rename($tmpFilename, $dstFilename);
 			}
-			wireChmod($dstFilename);
+			$this->wire('files')->chmod($dstFilename);
 		} else {
 			// fail
-			if(is_file($tmpFilename)) unlink($tmpFilename);	
+			if(is_file($tmpFilename)) $this->wire('files')->unlink($tmpFilename);	
 		}
 		
 		return $result;

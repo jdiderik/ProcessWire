@@ -127,6 +127,7 @@
 }
 
 .InputfieldRepeater {
+	z-index: 1; 	
 	
 	.InputfieldWrapper,
 	.InputfieldWrapper > .Inputfields {
@@ -140,9 +141,7 @@
 
 	.InputfieldRepeaterAddItem input {
 		// count of added items hidden
-		position: absolute;
-		left: -9999px;
-		top: 0;
+		display: none !important;
 	}
 
 	ul.Inputfields + .InputfieldRepeaterAddItem {

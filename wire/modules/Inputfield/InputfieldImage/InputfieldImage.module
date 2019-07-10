@@ -210,6 +210,10 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 					$page = new NullPage();
 				}
 			}
+			if(wireClassExists('RepeaterPage')) {
+				/** @var RepeaterPage $page */
+				while(wireInstanceOf($page, 'RepeaterPage')) $page = $page->getForPage();
+			}
 			if($page->id && $this->wire('user')->hasPermission('page-edit-images', $page)) {
 				$modules->get('JqueryUI')->use('modal');
 			} else {
@@ -435,8 +439,8 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 			}
 			$pagefile2 = $pagefile->size($maxWidth, $maxHeight, array('cropping' => false));
 			if($pagefile->filename != $pagefile2->filename) {
-				unlink($pagefile->filename);
-				rename($pagefile2->filename, $pagefile->filename);
+				$this->wire('files')->unlink($pagefile->filename);
+				$this->wire('files')->rename($pagefile2->filename, $pagefile->filename);
 			}
 			$pagefile->getImageInfo(true); // force it to reload its dimensions
 		}
@@ -506,7 +510,7 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 			$exists = is_file($f);
 			
 			if($exists && $remove) {
-				unlink($f); 
+				$this->wire('files')->unlink($f); 
 				$exists = false;
 			}
 			
@@ -1306,12 +1310,13 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 			$this->message($this->_('Recreated all legacy thumbnails') . " - $this->name"); 
 		}
 
-		if(!$this->isAjax) {
+		if(!$this->isAjax && !$this->wire('config')->ajax) {
 			// process actions, but only on non-ajax save requests
 			foreach($this->value as $k => $pagefile) {
 				$id = $this->pagefileId($pagefile);
-				$action = $sanitizer->alphanumeric($input->{"act_$id"});
+				$action = $input->{"act_$id"};
 				if(empty($action)) continue;
+				$action = $sanitizer->pageName($action);
 				$actions = $this->getFileActions($pagefile);
 				if(!isset($actions[$action])) continue; // action not available for this file
 				$success = $this->processFileAction($pagefile, $action, $actions[$action]);
@@ -1439,6 +1444,11 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		if($success === null) {
 			// for hooks
 			$success = $this->processUnknownFileAction($pagefile, $action, $label); 
+		}
+		
+		if($success) {
+			$pagefile->trackChange("action-$action");
+			$this->trackChange('value');
 		}
 		
 		if($success && $showSuccess) {

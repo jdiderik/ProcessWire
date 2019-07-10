@@ -36,10 +36,13 @@
  * @property-read string $url
  * @property-read string $basename
  * @property-read string $filename
- * @property-read array $focus Focus array contains 'top' (float), 'left' (float), 'zoom' (int), and 'default' (bool) properties. 
+ * @property-read array $focus Focus array contains 'top' (float), 'left' (float), 'zoom' (int), and 'default' (bool) properties.
+ * @property-read string $focusStr Readable string containing focus information.
  * @property-read bool $hasFocus Does this image have custom focus settings? (i.e. $focus['default'] == true)
+ * @property-read array $suffix Array containing file suffix(es).
+ * @property-read string $suffixStr String of file suffix(es) separated by comma.
  * 
- * @method bool|array isVariation($basename, $allowSelf = false)
+ * @method bool|array isVariation($basename, $options = array())
  * @method Pageimage crop($x, $y, $width, $height, $options = array())
  * @method array rebuildVariations($mode = 0, array $suffix = array(), array $options = array())
  * @method install($filename)
@@ -201,7 +204,8 @@ class Pageimage extends Pagefile {
 	 *   - SET: Specify both $top and $left arguments to set (values assumed to be percentages).
 	 *   - SET: Specify array containing "top" and "left" indexes to set (percentages). 
 	 *   - SET: Specify array where index 0 is top and index 1 is left (percentages). 
-	 *   - SET: Specify string in the format "top left", i.e. "25 70" (percentages). 
+	 *   - SET: Specify string in the format "top left", i.e. "25 70" or "top left zoom", i.e. "25 70 30" (percentages).
+	 *   - SET: Specify CSV key=value string in the format "top=25%, left=70%, zoom=30%" in any order
 	 *   - UNSET: Specify boolean false to remove any focus values. 
 	 * @param null|float|int $left Set left value (when $top value is float|int) 
 	 *   - This argument is only used when setting focus and should be omitted otherwise. 
@@ -214,16 +218,29 @@ class Pageimage extends Pagefile {
 	 */
 	public function focus($top = null, $left = null, $zoom = null) {
 		
-		if(is_string($top) && strpos($top, ' ') && $left === null) {
-			// SET string like "25 70 0" (representing "top left zoom")
-			if(strpos($top, ' ') != strrpos($top, ' ')) {
-				// with zoom
-				list($top, $left, $zoom) = explode(' ', $top, 3);
-			} else {
-				// without zoom
-				list($top, $left) = explode(' ', $top, 2);
-				$zoom = 0;
-			}	
+		if(is_string($top) && $left === null) { 
+			if(strpos($top, '=')) {
+				// SET string "top=25%, left=70%, zoom=0%"
+				$a = array('top' => 50, 'left' => 50, 'zoom' => 0);
+				$parts = explode(',', str_replace(array(' ', '%'), '', $top));
+				foreach($parts as $part) {
+					if(!strpos($part, '=')) continue;
+					list($name, $pct) = explode('=', $part);
+					$a[$name] = strpos($pct, '.') !== false ? (float) $pct : (int) $pct;
+				}
+				$top = $a; // for later setting by array
+				unset($a);
+			} else if(strpos($top, ' ')) {
+				// SET string like "25 70 0" (representing "top left zoom")
+				if(strpos($top, ' ') != strrpos($top, ' ')) {
+					// with zoom
+					list($top, $left, $zoom) = explode(' ', $top, 3);
+				} else {
+					// without zoom
+					list($top, $left) = explode(' ', $top, 2);
+					$zoom = 0;
+				}
+			}
 		}
 		
 		if($top === null || $top === true || ($top === 1 && $left === null)) {
@@ -324,8 +341,18 @@ class Pageimage extends Pagefile {
 			case 'focus':
 				$value = $this->focus();
 				break;
+			case 'focusStr':
+				$focus = $this->focus();
+				$value = "top=$focus[top]%,left=$focus[left]%,zoom=$focus[zoom]%" . ($focus['default'] ? " (default)" : "");
+				break;
 			case 'hasFocus': 
 				$value = $this->focus(true);
+				break;
+			case 'suffix':
+				$value = $this->suffix();
+				break;
+			case 'suffixStr':
+				$value = implode(',', $this->suffix());
 				break;
 			default: 
 				$value = parent::get($key); 
@@ -475,6 +502,7 @@ class Pageimage extends Pagefile {
 	 *  - `nameHeight` (int): Height to use for filename (default is to use specified $height argument). 
 	 *  - `focus` (bool): Should resizes that result in crop use focus area if available? (default=true). 
 	 *     In order for focus to be applicable, resize must include both width and height. 
+	 *  - `allowOriginal` (bool): Return original if already at width/height? May not be combined with other options. (default=false)
 	 * 
 	 * **Possible values for "cropping" option**  
 	 * 
@@ -580,6 +608,7 @@ class Pageimage extends Pagefile {
 			'nameHeight' => null,  // override height to use for filename, int when populated
 			'focus' => true, // allow single dimension resizes to use focus area?
 			'zoom' => null, // zoom override, used only if focus is applicable, int when populated
+			'allowOriginal' => false, // Return original image if already at requested dimensions? (must be only specified option)
 			);
 
 		$this->error = '';
@@ -591,6 +620,13 @@ class Pageimage extends Pagefile {
 
 		$width = (int) $width;
 		$height = (int) $height;
+		
+		if($options['allowOriginal'] && count($requestOptions) === 1) {
+			if((!$width || $this->width() == $width) && (!$height || $this->height() == $height)) {
+				// return original image if already at requested width/height
+				return $this;
+			}
+		}
 	
 		if($options['cropping'] === true && empty($options['cropExtra']) && $options['focus'] && $this->hasFocus && $width && $height) {
 			// crop to focus area
@@ -665,8 +701,8 @@ class Pageimage extends Pagefile {
 		if(!$exists || $options['forceNew']) {
 			// filenameUnvalidated is temporary filename used for resize
 			$filenameUnvalidated = $this->pagefiles->page->filesManager()->getTempPath() . $basename;
-			if($exists && $options['forceNew']) @unlink($filenameFinal);
-			if(file_exists($filenameUnvalidated)) @unlink($filenameUnvalidated);
+			if($exists && $options['forceNew']) $this->wire('files')->unlink($filenameFinal, true);
+			if(file_exists($filenameUnvalidated)) $this->wire('files')->unlink($filenameUnvalidated, true);
 			if(@copy($this->filename(), $filenameUnvalidated)) {
 				try { 
 					
@@ -724,8 +760,8 @@ class Pageimage extends Pagefile {
 		// if an error occurred, that error property will be populated with details
 		if($this->error) { 
 			// error condition: unlink copied file 
-			if(is_file($filenameFinal)) @unlink($filenameFinal);
-			if($filenameUnvalidated && is_file($filenameUnvalidated)) @unlink($filenameUnvalidated);
+			if(is_file($filenameFinal)) $this->wire('files')->unlink($filenameFinal, true);
+			if($filenameUnvalidated && is_file($filenameUnvalidated)) $this->wire('files')->unlink($filenameUnvalidated);
 
 			// write an invalid image so it's clear something failed
 			// todo: maybe return a 1-pixel blank image instead?
@@ -984,13 +1020,33 @@ class Pageimage extends Pagefile {
 	 * 
 	 * @param int $width Max allowed width
 	 * @param int $height Max allowed height
-	 * @param array $options See `Pageimage::size()` method for options
+	 * @param array $options See `Pageimage::size()` method for options, or these additional options:
+	 *  - `allowOriginal` (bool): Allow original image to be returned if already within max requested dimensions? (default=false)
 	 * @return Pageimage
 	 * 
 	 */
 	public function maxSize($width, $height, $options = array()) {
-		$options['upscaling'] = false;
-		$options['cropping'] = false;
+		
+		$defaults = array(
+			'allowOriginal' => false,
+			'upscaling' => false,
+			'cropping' => false
+		);
+		
+		$options = array_merge($defaults, $options);
+		$adjustedWidth = $width < 1 || $this->width() <= $width ? 0 : $width;
+		$adjustedHeight = $height < 1 || $this->height() <= $height ? 0 : $height;
+
+		// if already within maxSize dimensions then do nothing
+		if(!$adjustedWidth && !$adjustedHeight) {
+			if($options['allowOriginal']) return $this; // image already within target
+			$adjustedWidth = $width;
+			$options['nameHeight'] = $height;
+		} else if(!$adjustedWidth) {
+			$options['nameWidth'] = $width;
+		} else if(!$adjustedHeight) {
+			$options['nameHeight'] = $height;
+		}
 		
 		if($this->wire('config')->installed > 1513336849) { 
 			// New installations from 2017-12-15 forward use an "ms" suffix for images from maxSize() method
@@ -1000,7 +1056,7 @@ class Pageimage extends Pagefile {
 			$options['suffix'] = $suffix;
 		}
 		
-		return $this->size($width, $height, $options);
+		return $this->size($adjustedWidth, $adjustedHeight, $options);
 	}
 
 	/**
@@ -1012,7 +1068,10 @@ class Pageimage extends Pagefile {
 	 * #pw-group-variations
 	 *
 	 * @param array $options Optional, one or more options in an associative array of the following: 
-	 * 	- `info` (bool): when true, method returns variation info arrays rather than Pageimage objects
+	 * 	- `info` (bool): when true, method returns variation info arrays rather than Pageimage objects (default=false).
+	 *  - `verbose` (bool): Return verbose array of info. If false, returns only filenames (default=true). 
+	 *     This option does nothing unless the `info` option is true. Also note that if verbose is false, then all options
+	 *     following this one no longer apply (since it is no longer returning width/height info). 
 	 * 	- `width` (int): only variations with given width will be returned
 	 * 	- `height` (int): only variations with given height will be returned
 	 * 	- `width>=` (int): only variations with width greater than or equal to given will be returned
@@ -1020,24 +1079,56 @@ class Pageimage extends Pagefile {
 	 * 	- `width<=` (int): only variations with width less than or equal to given will be returned
 	 * 	- `height<=` (int): only variations with height less than or equal to given will be returned
 	 * 	- `suffix` (string): only variations having the given suffix will be returned
+	 *  - `suffixes` (array): only variations having one of the given suffixes will be returned
+	 *  - `noSuffix` (string): exclude variations having this suffix
+	 *  - `noSuffixes` (array): exclude variations having any of these suffixes
+	 *  - `name` (string): only variations containing this text in filename will be returned (case insensitive)
+	 *  - `noName` (string): only variations NOT containing this text in filename will be returned (case insensitive)
+	 *  - `regexName` (string): only variations that match this PCRE regex will be returned
 	 * @return Pageimages|array Returns Pageimages array of Pageimage instances. 
 	 *  Only returns regular array if provided `$options['info']` is true.
 	 *
 	 */
 	public function getVariations(array $options = array()) {
 
-		if(!is_null($this->variations)) return $this->variations; 
-
-		$variations = $this->wire(new Pageimages($this->pagefiles->page)); 
+		if(!is_null($this->variations) && empty($options)) return $this->variations; 
+		
+		$defaults = array(
+			'info' => false,
+			'verbose' => true, 
+		);
+		
+		$options = array_merge($defaults, $options);
+		if(!$options['verbose'] && !$options['info']) $options['verbose'] = true; // non-verbose only allowed if info==true
+		$variations = $options['info'] ? null : $this->wire(new Pageimages($this->pagefiles->page)); 
 		$dir = new \DirectoryIterator($this->pagefiles->path); 
 		$infos = array();
 
+		// if suffix or noSuffix option contains space, convert it to suffixes or noSuffixes array option
+		foreach(array('suffix', 'noSuffix') as $key) {
+			if(!isset($options[$key])) continue;
+			if(strpos(trim($options['suffix']), ' ') === false) continue;
+			$keyPlural = $key . 'es';
+			$value = isset($options[$keyPlural]) ? $options[$keyPlural] : array();
+			$options[$keyPlural] = array_merge($value, explode(' ', trim($options[$key]))); 
+			unset($options[$key]);
+		}
+
 		foreach($dir as $file) {
+			
 			if($file->isDir() || $file->isDot()) continue; 			
-			$info = $this->isVariation($file->getFilename());
+			
+			$info = $this->isVariation($file->getFilename(), array('verbose' => $options['verbose']));
 			if(!$info) continue; 
+			
+			if($options['info'] && !$options['verbose']) {
+				$infos[] = $info;
+				continue;
+			}
+			
 			$allow = true;
-			if(count($options)) foreach($options as $option => $value) {
+			
+			foreach($options as $option => $value) {
 				switch($option) {
 					case 'width': $allow = $info['width'] == $value; break;
 					case 'width>=': $allow = $info['width'] >= $value; break;
@@ -1045,10 +1136,34 @@ class Pageimage extends Pagefile {
 					case 'height': $allow = $info['height'] == $value; break;
 					case 'height>=': $allow = $info['height'] >= $value; break;
 					case 'height<=': $allow = $info['height'] <= $value; break;
+					case 'name': $allow = stripos($file->getBasename(), $value) !== false; break;
+					case 'noName': $allow = stripos($file->getBasename(), $value) === false; break;
+					case 'regexName': $allow = preg_match($value, $file->getBasename()); break;
 					case 'suffix': $allow = in_array($value, $info['suffix']); break;
+					case 'noSuffix': $allow = !in_array($value, $info['suffix']); break;
+					case 'suffixes':
+						// any one of given suffixes will allow the variation
+						$allow = false;
+						foreach($value as $suffix) {
+							$allow = in_array($suffix, $info['suffix']);
+							if($allow) break;
+						}
+						break;
+					case 'noSuffixes': 
+						// any one of the given suffixes will disallow the variation
+						$allow = true;
+						foreach($value as $noSuffix) {
+							if(!in_array($noSuffix, $info['suffix'])) continue;
+							$allow = false;
+							break;
+						}
+						break;
 				}
+				if(!$allow) break;
 			}
+			
 			if(!$allow) continue; 
+			
 			if(!empty($options['info'])) {
 				$infos[$file->getBasename()] = $info;
 			} else {
@@ -1061,12 +1176,11 @@ class Pageimage extends Pagefile {
 			}
 		}
 
-		if(!empty($options['info'])) {
-			return $infos;
-		} else {
-			$this->variations = $variations;
-			return $variations; 
-		}
+		if(!empty($options['info'])) return $infos;
+		
+		if(empty($options)) $this->variations = $variations;
+		
+		return $variations; 
 	}
 
 	/**
@@ -1165,7 +1279,7 @@ class Pageimage extends Pagefile {
 			// rebuild the variation
 			$o['forceNew'] = true; 
 			$o['suffix'] = $info['suffix'];
-			if(is_file($info['path'])) unlink($info['path']); 
+			if(is_file($info['path'])) $this->wire('files')->unlink($info['path'], true); 
 		
 			/*
 			if(!$info['width'] && $info['actualWidth']) {
@@ -1238,15 +1352,26 @@ class Pageimage extends Pagefile {
 	 * #pw-group-variations
 	 * 
 	 * @param string $basename Filename to check (basename, which excludes path)
-	 * @param bool $allowSelf When true, it will return variation info even if same as current Pageimage.
-	 * @return bool|array Returns false if not a variation, or array of info if it is.
+	 * @param array|bool $options Array of options to modify behavior, or boolean to only specify `allowSelf` option.
+	 *  - `allowSelf` (bool): When true, it will return variation info even if same as current Pageimage. (default=false)
+	 *  - `verbose` (bool): Return verbose array of info? If false, just returns basename (string) or false. (default=true)
+	 * @return bool|string|array Returns false if not a variation, or array (verbose) or string (non-verbose) of info if it is.
 	 *
 	 */
-	public function ___isVariation($basename, $allowSelf = false) {
+	public function ___isVariation($basename, $options = array()) {
+		
+		$defaults = array(
+			'allowSelf' => false, 
+			'verbose' => true, 
+		);
+		
+		if(!is_array($options)) $options = array('allowSelf' => (bool) $options);
+		$options = array_merge($defaults, $options);
 
 		static $level = 0;
 		$variationName = basename($basename);
 		$originalName = $this->basename; 
+		$info = array();
 	
 		// that that everything from the beginning up to the first period is exactly the same
 		// otherwise, they are different source files
@@ -1264,7 +1389,7 @@ class Pageimage extends Pagefile {
 		}
 	
 		// if file is the same as the original, then it's not a variation
-		if(!$allowSelf && $variationName == $this->basename) return false;
+		if(!$options['allowSelf'] && $variationName == $this->basename) return false;
 		
 		// if file doesn't start with the original name then it's not a variation
 		if(strpos($variationName, $originalName) !== 0) return false; 
@@ -1287,16 +1412,14 @@ class Pageimage extends Pagefile {
 
 		// identify parent and any parent suffixes
 		$suffixAll = array();
-		while(($pos = strrpos($base, '.')) !== false) {
-			$part = substr($base, $pos+1); 
-			// if(is_null($parent)) {
-				// $parent = substr($base, 0, $pos) . $ext;
-				//$parent = $originalName . "." . $part . $ext;
-			// }
-			$base = substr($base, 0, $pos); 
-			while(($rpos = strrpos($part, '-')) !== false) {
-				$suffixAll[] = substr($part, $rpos+1); 
-				$part = substr($part, 0, $rpos); 
+		if($options['verbose']) {
+			while(($pos = strrpos($base, '.')) !== false) {
+				$part = substr($base, $pos + 1);
+				$base = substr($base, 0, $pos);
+				while(($rpos = strrpos($part, '-')) !== false) {
+					$suffixAll[] = substr($part, $rpos + 1);
+					$part = substr($part, 0, $rpos);
+				}
 			}
 		}
 
@@ -1321,7 +1444,7 @@ class Pageimage extends Pagefile {
 		// if regex does not match, return false
 		if(preg_match($re1, $meat, $matches)) {
 			// this is a variation with dimensions, return array of info
-			$info = array(
+			if($options['verbose']) $info = array(
 				'name' => $basename, 
 				'url' => $this->pagefiles->url . $basename, 
 				'path' => $this->pagefiles->path . $basename, 
@@ -1335,7 +1458,7 @@ class Pageimage extends Pagefile {
 		} else if(preg_match($re2, $meat, $matches)) {
 		
 			// this is a variation only with suffix
-			$info = array(
+			if($options['verbose']) $info = array(
 				'name' => $basename, 
 				'url' => $this->pagefiles->url . $basename,
 				'path' => $this->pagefiles->path . $basename, 
@@ -1349,12 +1472,15 @@ class Pageimage extends Pagefile {
 		} else {
 			return false; 
 		}
+	
+		// if not in verbose mode, just return variation basename
+		if(!$options['verbose']) return $variationName;
 
 		$actualInfo = $this->getImageInfo($info['path']); 
 		$info['actualWidth'] = $actualInfo['width'];
 		$info['actualHeight'] = $actualInfo['height'];
-		$info['hidpiWidth'] = $this->hidpiWidth(0, $info['width']);
-		$info['hidpiHeight'] = $this->hidpiWidth(0, $info['height']); 
+		$info['hidpiWidth'] = $this->hidpiWidth(0, $info['actualWidth']);
+		$info['hidpiHeight'] = $this->hidpiWidth(0, $info['actualHeight']);
 	
 		if(empty($info['crop'])) {
 			// attempt to extract crop info from suffix
@@ -1387,19 +1513,41 @@ class Pageimage extends Pagefile {
 	 * 
 	 * #pw-group-variations
 	 *
-	 * @return $this
+	 * @param array $options See options for getVariations() method to limit what variations are removed, plus these:
+	 *  - `dryRun` (bool): Do not remove now and instead only return the filenames of variations that would be deleted (default=false).
+	 *  - `getFiles` (bool): Return deleted filenames? Also assumed if the test option is used (default=false). 
+	 * @return $this|array Returns $this by default, or array of deleted filenames if the `returnFiles` option is specified
 	 *
 	 */
-	public function removeVariations() {
+	public function removeVariations(array $options = array()) {
+		
+		$defaults = array(
+			'dryRun' => false,
+			'getFiles' => false
+		);
 
-		$variations = $this->getVariations();	
+		$variations = $this->getVariations($options);
+		if(!empty($options['dryrun'])) $defaults['dryRun'] = $options['dryrun']; // case insurance
+		$options = array_merge($defaults, $options); // placement after getVariations() intended
+		$deletedFiles = array();
+		
+		/** @var WireFileTools $files */
+		$files = $this->wire('files');
 
 		foreach($variations as $variation) {
-			if(is_file($variation->filename)) unlink($variation->filename); 			
+			$filename = $variation->filename;
+			if(!is_file($filename)) continue;
+			if($options['dryRun']) {
+				$success = true;
+			} else {
+				$success = $files->unlink($filename, true);
+			}
+			if($success) $deletedFiles[] = $filename;
 		}
 
-		$this->variations = null;
-		return $this;	
+		if(!$options['dryRun']) $this->variations = null;
+		
+		return ($options['dryRun'] || $options['getFiles'] ? $deletedFiles : $this);
 	}
 
 	/**
@@ -1483,6 +1631,36 @@ class Pageimage extends Pagefile {
 			parent::unlink();
 			throw new WireException($this->_('Unable to install invalid image')); 
 		}
+	}
+
+	/**
+	 * Debug info
+	 * 
+	 * @return array
+	 * 
+	 */
+	public function __debugInfo() {
+		static $depth = 0;
+		$depth++;
+		$info = parent::__debugInfo();	
+		$info['width'] = $this->width();	
+		$info['height'] = $this->height();
+		$info['suffix'] = $this->suffixStr;
+		if($this->hasFocus) $info['focus'] = $this->focusStr;
+		if(isset($info['filedata']) && isset($info['filedata']['focus'])) unset($info['filedata']['focus']); 
+		if(empty($info['filedata'])) unset($info['filedata']);
+		$original = $this->original;
+		if($original && $original !== $this) $info['original'] = $original->basename;
+		if($depth < 2) {
+			$info['variations'] = array();
+			$variations = $this->getVariations(array('info' => true, 'verbose' => false));
+			foreach($variations as $name) {
+				$info['variations'][] = $name;
+			}
+			if(empty($info['variations'])) unset($info['variations']); 
+		}
+		$depth--;
+		return $info;
 	}
 
 }

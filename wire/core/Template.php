@@ -21,6 +21,7 @@
  * @property string $ns Namespace found in the template file, or blank if not determined.   #pw-group-identification
  * @property string $pageClass Class for instantiated page objects. Page assumed if blank, or specify class name.  #pw-group-identification
  * @property int $modified Last modified time for template or template file
+ * @property string $icon Icon name specified with the template (preferable to use getIcon/setIcon methods instead). #pw-internal
  * 
  * Fieldgroup/Fields 
  * 
@@ -590,7 +591,7 @@ class Template extends WireData implements Saveable, Exportable {
 
 			if($this->settings[$key] != $value) {
 				if($this->settings[$key] && ($this->settings['flags'] & Template::flagSystem) && in_array($key, array('id', 'name'))) {
-					throw new WireException("Template '$this' has the system flag and you may not change it's 'id' or 'name' fields. "); 
+					throw new WireException("Template '$this' has the system flag and you may not change its 'id' or 'name' fields. "); 
 				}
 				$this->trackChange($key, $this->settings[$key], $value); 
 			}

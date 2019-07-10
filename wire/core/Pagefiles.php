@@ -38,7 +38,7 @@
  * Typically a Pagefiles object will be associated with a specific field attached to a Page. 
  * There may be multiple instances of Pagefiles attached to a given Page (depending on what fields are in it's fieldgroup).
  * 
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2018 by Ryan Cramer
  * https://processwire.com
  *
  *
@@ -337,6 +337,18 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 		if(is_string($item)) {
 			/** @var Pagefile $item */
 			$item = $this->wire(new Pagefile($this, $item)); 
+			
+		} else if($item instanceof Pagefile) {
+			$page = $this->get('page');	
+			if($page && "$page" !== "$item->page") {
+				$newItem = clone $item;
+				$newItem->setPagefilesParent($this);
+				$newItem->install($item->filename);
+				$newItem->isTemp(true);
+				$this->unTempQueue($newItem);
+				$this->message("Copied $item->url to $newItem->url", Notice::debug); 
+				$item = $newItem;
+			}
 		}
 
 		/** @var Pagefiles $result */
@@ -905,5 +917,29 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 		return $this->formatted;
 	}
 
+	/**
+	 * Debug info
+	 * 
+	 * @return array
+	 * 
+	 */
+	public function __debugInfo() {
+		
+		$info = array(
+			'count' => $this->count(), 
+			'page' => $this->page ? $this->page->path() : '?',
+			'field' => $this->field ? $this->field->name : '?', 
+			'url' => $this->url(),
+			'path' => $this->path(), 
+			'items' => array(),
+		);
+		
+		foreach($this as $key => $pagefile) {
+			/** @var Pagefile $pagefile */
+			$info['items'][$key] = $pagefile->__debugInfo();
+		}
+		
+		return $info;
+	}
 
 }

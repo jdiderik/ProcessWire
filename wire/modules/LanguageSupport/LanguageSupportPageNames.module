@@ -21,7 +21,7 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 	static public function getModuleInfo() {
 			return array(
 				'title' => 'Languages Support - Page Names',
-				'version' => 9,
+				'version' => 10,
 				'summary' => 'Required to use multi-language page names.',
 				'author' => 'Ryan Cramer',
 				'autoload' => true,
@@ -102,6 +102,7 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 		$this->addHookAfter('PageFinder::getQuery', $this, 'hookPageFinderGetQuery'); 
 
 		// tell ProcessPageView which segments are allowed for pagination
+		$config = $this->wire('config');
 		$pageNumUrlPrefixes = array();
 		$fields = $this->wire('fields');
 		foreach($this->wire('languages') as $language) {
@@ -109,7 +110,10 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 			if($pageNumUrlPrefix) $pageNumUrlPrefixes[] = $pageNumUrlPrefix;
 			$fields->setNative("name$language"); 
 		}
-		if(count($pageNumUrlPrefixes)) $this->wire('config')->set('pageNumUrlPrefixes', $pageNumUrlPrefixes); 
+		if(count($pageNumUrlPrefixes)) {
+			$pageNumUrlPrefixes[] = $config->pageNumUrlPrefix; // original/fallback prefix
+			$config->set('pageNumUrlPrefixes', $pageNumUrlPrefixes);
+		}
 	}
 
 	/**
@@ -158,7 +162,11 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 		
 		$language = $this->wire('user')->language; 
 		$prefix = $this->get("pageNumUrlPrefix$language"); 
-		if(strlen($prefix)) $this->wire('config')->pageNumUrlPrefix = $prefix; 
+		if(strlen($prefix)) {
+			$config = $this->wire('config');
+			$config->set('_pageNumUrlPrefix', $config->pageNumUrlPrefix); // origial/backup url prefix
+			$config->pageNumUrlPrefix = $prefix;
+		}
 	}
 
 	/**
@@ -240,6 +248,7 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 
 		// determine if we should set the current language based on requested URL
 		if(!$setLanguage) foreach($parentsAndPage as $p) {
+			/** @var Page $p */
 
 			$requestedPart = strtolower(array_shift($requestedParts)); 
 			if($requestedPart === $p->name) continue; 
@@ -404,6 +413,10 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 		if($this->force404) {
 			$this->force404 = false; // prevent another 404 on the 404 page
 			throw new Wire404Exception();
+			// $page = $event->wire('page');		
+			// if(!$page || ($page->id != $event->wire('config')->http404PageID)) {
+			//	throw new Wire404Exception();
+			// }
 		}
 	}
 
@@ -565,12 +578,9 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 			$key = "name$language";
 			if($value == $page->get($key)) continue; 
 			
-			// @todo make the following apply without debug+advanced mode after further testing on dev
-			if($this->wire('config')->debug && $this->wire('config')->advanced) {
-				$parentID = $page->parent_id;
-				if(!$parentID) $parentID = (int) $this->wire('input')->post('parent_id');
-				if(!$this->checkLanguagePageName($language, $page, $parentID, $value, $inputfield)) continue;
-			}
+			$parentID = $page->parent_id;
+			if(!$parentID) $parentID = (int) $this->wire('input')->post('parent_id');
+			if(!$this->checkLanguagePageName($language, $page, $parentID, $value, $inputfield)) continue;
 
 			if($page->id) {
 				$page->set($key, $value);
@@ -597,6 +607,10 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 		$nameKey = "name$language->id";
 		
 		if(!strlen($value)) return true; 
+		
+		if($this->wire('config')->pageNameCharset == 'UTF8') {
+			$value = $this->wire('sanitizer')->pageName($value, Sanitizer::toAscii); 
+		}
 		
 		$sql =
 			"SELECT id, name, $nameKey FROM pages " .
@@ -684,6 +698,7 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 	 *
 	 */
 	public function hookPageLocalName(HookEvent $event) {
+		/** @var Page $page */
 		$page = $event->object; 
 		$language = $this->getLanguage($event->arguments(0)); 
 		$nameField = $language->isDefault() ? "name" : "name$language";
@@ -845,18 +860,22 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 
 		/** @var Page $page */
 		$page = $event->arguments[0];
+		
 		/** @var Pages $pages */
 		$pages = $event->object; 
+	
+		/** @var Sanitizer $sanitizer */
+		$sanitizer = $this->wire('sanitizer');
+	
+		/** @var array $extraData */
 		$extraData = $event->return; 
-		if(!is_array($extraData)) $extraData = array();
+		
 		$alwaysActiveTypes = array('User', 'Role', 'Permission', 'Language'); 
 		$pageNameCharset = $this->wire('config')->pageNameCharset;
+		$isCloning = $pages->editor()->isCloning();
 		
-		$defaultN = 1;
-		if($pages->cloning && preg_match('/^(.+)-(\d+)$/', $page->name, $matches)) {
-			$defaultN = (int) $matches[2];
-		}
-
+		if(!is_array($extraData)) $extraData = array();
+		
 		foreach($this->wire('languages') as $language) {
 			
 			if($language->isDefault()) continue; 
@@ -864,21 +883,20 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 
 			// populate a name123 field for each language
 			$name = "name$language_id";
-			$value = $this->wire('sanitizer')->pageNameUTF8($page->get($name)); 
+			$value = $sanitizer->pageNameUTF8($page->get($name)); 
 			if(!strlen($value)) {
 				$value = 'NULL';
-			} else if($pages->cloning) {
+			} else if($isCloning) {
 				// this save is the result of a clone() operation
 				// make sure that the name is unique for other languages
-				$newValue = $value;
-				while($page->parent->children("$name=$newValue, include=all")->count() > 0) {
-					$newValue = $value . "-$defaultN";
-					$defaultN++;
-				}
-				$value = $newValue; 
+				$value = $pages->names()->uniquePageName(array(
+					'name' => $value, 
+					'page' => $page, 
+					'language' => $language, 
+				));
 			}
 			if($pageNameCharset == 'UTF8') {
-				$extraData[$name] = $this->wire('sanitizer')->pageName($value, Sanitizer::toAscii);
+				$extraData[$name] = $sanitizer->pageName($value, Sanitizer::toAscii);
 			} else {
 				$extraData[$name] = $value;
 			}
@@ -1108,15 +1126,20 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 		$module = $this->wire('modules')->get('LanguageSupportPageNames'); 
 		$module->checkModuleVersion(true); 
 		$inputfields = $this->wire(new InputfieldWrapper());
-
+		$config = $this->wire('config');
+		$defaultUrlPrefix = $config->get('_pageNumUrlPrefix|pageNumUrlPrefix');
+		
 		foreach($this->wire('languages') as $language) {
 			$f = $this->wire('modules')->get('InputfieldName'); 
 			$name = "pageNumUrlPrefix$language";
-			if($language->isDefault() && empty($data[$name])) $data[$name] = $this->wire('config')->pageNumUrlPrefix;
+			if($language->isDefault() && empty($data[$name])) $data[$name] = $defaultUrlPrefix;
 			$f->attr('name', $name); 
 			$f->attr('value', isset($data[$name]) ? $data[$name] : ''); 
 			$f->label = "$language->title ($language->name) - " . $this->_('Page number prefix for pagination'); 
-			$f->description = sprintf($this->_('The page number is appended to this word in paginated URLs for this language. If omitted, "%s" will be used.'), $this->wire('config')->pageNumUrlPrefix); 
+			$f->description = sprintf(
+				$this->_('The page number is appended to this word in paginated URLs for this language. If omitted, "%s" will be used.'), 
+				$defaultUrlPrefix
+			); 
 			$f->required = false;
 			$inputfields->add($f); 
 		}

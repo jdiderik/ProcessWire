@@ -710,7 +710,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 	protected function renderTestSelector($selector) {
 		try {
 			$selector = $this->sanitizeSelectorString($selector); 
-			$cnt = $this->wire('pages')->count($selector);
+			$cnt = $this->wire('pages')->count($selector, array('allowCustom' => true));
 			$out = '';
 			// take into account a limit=n 
 			if(strpos($selector, 'limit=') !== false && preg_match('/\blimit=(\d+)/', $selector, $matches)) {
@@ -779,7 +779,7 @@ class InputfieldSelector extends Inputfield implements ConfigurableModule {
 		}
 	
 		$limitSubfields = null; // becomes $limitField indexed array of subfield names when applicable
-		if(count($this->limitFields)) {
+		if(wireCount($this->limitFields)) {
 			$limitSubfields = array();
 			foreach($this->limitFields as $limitField) {
 				$settings['limitFields'][$limitField] = $limitField;

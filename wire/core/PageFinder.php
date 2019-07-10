@@ -1,8 +1,5 @@
 <?php namespace ProcessWire;
 
-class PageFinderException extends WireException { }
-class PageFinderSyntaxException extends PageFinderException { }
-
 /**
  * ProcessWire PageFinder
  *
@@ -13,7 +10,7 @@ class PageFinderSyntaxException extends PageFinderException { }
  *
  * Hookable methods: 
  * =================
- * @method array|DatabaseQuerySelect find(Selectors $selectors, $options = array())
+ * @method array|DatabaseQuerySelect find(Selectors|string|array $selectors, $options = array())
  * @method DatabaseQuerySelect getQuery($selectors, array $options)
  * @method string getQueryAllowedTemplatesWhere(DatabaseQuerySelect $query, $where)
  * @method void getQueryJoinPath(DatabaseQuerySelect $query, $selector)
@@ -46,7 +43,7 @@ class PageFinder extends Wire {
 		 *
 		 */
 		'findUnpublished' => false,
-
+		
 		/**
 		 * Specify that it's okay for hidden AND unpublished AND trashed pages to be included in the results
 		 *
@@ -58,6 +55,12 @@ class PageFinder extends Wire {
 		 *
 		 */
 		'findAll' => false,
+
+		/**
+		 * Always allow these page IDs to be included regardless of findHidden, findUnpublished, findTrash, findAll settings
+		 * 
+		 */
+		'alwaysAllowIDs' => array(),
 
 		/**
 		 * This is an optimization used by the Pages::find method, but we observe it here as we may be able
@@ -329,7 +332,7 @@ class PageFinder extends Wire {
 	/**
 	 * Return all pages matching the given selector.
 	 * 
-	 * @param Selectors|string|array $selectors Selectors object or selector string
+	 * @param Selectors|string|array $selectors Selectors object, selector string or selector array
 	 * @param array $options
 	 *  - `findOne` (bool): Specify that you only want to find 1 page and don't need info for pagination (default=false).
 	 *  - `findHidden` (bool): Specify that it's okay for hidden pages to be included in the results (default=false). 
@@ -348,7 +351,7 @@ class PageFinder extends Wire {
 	 *  - `returnQuery` (bool): When true, only the DatabaseQuery object is returned by find(), for internal use. (default=false)
 	 *  - `loadPages` (bool): This is an optimization used by the Pages::find() method, but we observe it here as we
 	 *     may be able to apply  some additional optimizations in certain cases. For instance, if loadPages=false, then
-	 *     we can skip retrieval of IDs and omit  sort fields. (default=true)
+	 *     we can skip retrieval of IDs and omit sort fields. (default=true)
 	 *  - `stopBeforeID` (int): Stop loading pages once a page matching this ID is found. Page having this ID will be
 	 *     excluded as well (default=0).
 	 *  - `startAfterID` (int): Start loading pages once a page matching this ID is found. Page having this ID will be
@@ -368,7 +371,7 @@ class PageFinder extends Wire {
 		if(is_string($selectors) || is_array($selectors)) {
 			$selectors = new Selectors($selectors);
 		} else if(!$selectors instanceof Selectors) {
-			throw new PageFinderException("find() requires Selectors object or string");
+			throw new PageFinderException("find() requires Selectors object, string or array");
 		}
 
 		$this->fieldgroups = $this->wire('fieldgroups'); 
@@ -490,14 +493,46 @@ class PageFinder extends Wire {
 	/**
 	 * Same as find() but returns just a simple array of page IDs without any other info
 	 *
-	 * @param Selectors $selectors
+	 * @param Selectors|string|array $selectors Selectors object, selector string or selector array
 	 * @param array $options
 	 * @return array of page IDs
 	 *
 	 */
-	public function findIDs(Selectors $selectors, $options = array()) {
+	public function findIDs($selectors, $options = array()) {
 		$options['returnVerbose'] = false; 
 		return $this->find($selectors, $options); 
+	}
+
+	/**
+	 * Return a count of pages that match 
+	 * 
+	 * @param Selectors|string|array $selectors Selectors object, selector string or selector array
+	 * @param array $options
+	 * @return int
+	 * @since 3.0.121
+	 * 
+	 */
+	public function count($selectors, $options = array()) {
+		
+		$defaults = array(
+			'getTotal' => true,
+			'getTotalType' => 'count',
+			'loadPages' => false, 
+			'returnVerbose' => false
+		);
+		
+		$options = array_merge($defaults, $options);
+		
+		if(!empty($options['startBeforeID']) || !empty($options['stopAfterID'])) {
+			$options['loadPages'] = true;
+			$options['getTotalType'] = 'calc';
+			$count = count($this->find($selectors, $options));
+		} else {
+			$this->find($selectors, $options);
+			$count = $this->total;
+		}
+		
+		return $count;
 	}
 
 	/**
@@ -522,6 +557,7 @@ class PageFinder extends Wire {
 				$selectors->remove($selector);
 				if(!empty($options['allowCustom'])) {
 					$_selectors = $this->wire(new Selectors($selector->value()));
+					$this->preProcessSelectors($_selectors, $options);
 					/** @var Selectors $_selectors */
 					foreach($_selectors as $s) $selectors->add($s);
 				}
@@ -739,7 +775,7 @@ class PageFinder extends Wire {
 				
 				if($findExtends) {
 					if($foundTypes === null) {
-						$foundTypes = isset($this->pageArrayData['extends']) ? $this->pageDataArray['extends'] : array();
+						$foundTypes = isset($this->pageArrayData['extends']) ? $this->pageArrayData['extends'] : array();
 					}
 					$fType = $f->type->className();
 					if(isset($foundTypes[$fType])) {
@@ -783,20 +819,45 @@ class PageFinder extends Wire {
 	 *
 	 */
 	protected function preProcessSelector(Selector $selector, Selectors $selectors, array $options, $level = 0) {
-		
+	
+		/** @var Fields $fields */
+		$fields = $this->wire('fields');
 		$quote = $selector->quote;
-		$fields = $selector->fields;
+		$fieldsArray = $selector->fields;
 		$hasDoubleDot = false;
+		$tags = null;
 		
-		foreach($fields as $fn) {
+		foreach($fieldsArray as $key => $fn) {
+			
 			$dot = strpos($fn, '.');
+			$parts = $dot ? explode('.', $fn) : array($fn);
+			
+			// determine if it is a double-dot field (a.b.c)
 			if($dot && strrpos($fn, '.') !== $dot) {
 				if(strpos($fn, '__owner.') !== false) continue;
 				$hasDoubleDot = true;
-				break;
+			} 
+	
+			// determine if it is referencing any tags that should be coverted to field1|field2|field3
+			foreach($parts as $partKey => $part) {
+				if($tags !== null && empty($tags)) continue;
+				if($fields->get($part)) continue; // maps to Field object
+				if($fields->isNative($part)) continue; // maps to native property
+				if($tags === null) $tags = $fields->getTags(true); // determine tags
+				if(!isset($tags[$part])) continue; // not a tag
+				$tagFields = $tags[$part];
+				foreach($tagFields as $k => $fieldName) {
+					$_parts = $parts;
+					$_parts[$partKey] = $fieldName;
+					$tagFields[$k] = implode('.', $_parts);
+				}
+				if(count($tagFields)) {
+					unset($fieldsArray[$key]);
+					$selector->fields = array_merge($fieldsArray, $tagFields);
+				}
 			}
 		}
-	
+		
 		if($quote == '[') {
 			// selector contains another embedded selector that we need to convert to page IDs
 			// i.e. field=[id>0, name=something, this=that]
@@ -831,11 +892,11 @@ class PageFinder extends Wire {
 		} else if($hasDoubleDot) {
 			// has an "a.b.c" type string in the field, convert to a sub-selector
 			
-			if(count($fields) > 1) {
+			if(count($fieldsArray) > 1) {
 				throw new PageFinderSyntaxException("Multi-dot 'a.b.c' type selectors may not be used with OR '|' fields");
 			}
 			
-			$fn = reset($fields);
+			$fn = reset($fieldsArray);
 			$parts = explode('.', $fn);
 			$fieldName = array_shift($parts);
 			$field = $this->isPageField($fieldName);
@@ -1051,6 +1112,7 @@ class PageFinder extends Wire {
 		$fieldCnt = array(); // counts number of instances for each field to ensure unique table aliases for ANDs on the same field
 		$lastSelector = null; 
 		$sortSelectors = array(); // selector containing 'sort=', which gets added last
+		$subqueries = array();
 		$joins = array();
 		// $this->extraJoins = array();
 		$database = $this->wire('database');
@@ -1106,7 +1168,7 @@ class PageFinder extends Wire {
 				continue; 
 
 			} else if($this->wire('fields')->isNative($field) || strpos($fieldsStr, ':parent.') !== false) {
-				$this->getQueryNativeField($query, $selector, $fields); 
+				$this->getQueryNativeField($query, $selector, $fields, $options); 
 				continue; 
 			} 
 
@@ -1906,7 +1968,7 @@ class PageFinder extends Wire {
 				$query->join($sql); 
 
 			} else {
-				$query->join("pages AS rootparent ON ($alias.parent_id=rootparent.id AND rootparent.id=1)");
+				$query->join("pages AS rootparent$n ON ($alias.parent_id=rootparent$n.id AND rootparent$n.id=1)");
 			}
 			$lastAlias = $alias; 
 		}
@@ -1920,10 +1982,11 @@ class PageFinder extends Wire {
 	 * @param DatabaseQuerySelect $query
 	 * @param Selector $selector
 	 * @param array $fields
+	 * @param array $options
 	 * @throws PageFinderSyntaxException
 	 *
 	 */
-	protected function getQueryNativeField(DatabaseQuerySelect $query, $selector, $fields) {
+	protected function getQueryNativeField(DatabaseQuerySelect $query, $selector, $fields, array $options) {
 
 		$values = $selector->values(true); 
 		$SQL = '';
@@ -2053,6 +2116,14 @@ class PageFinder extends Wire {
 					if($isName) $value = $this->wire('sanitizer')->pageName($value, Sanitizer::toAscii); 
 					$value = $database->escapeStr($value); 
 					$s = "$table." . $field . $operator . ((ctype_digit("$value") && $field != 'name') ? ((int) $value) : "'$value'");
+				
+					if($field === 'status' && strpos($operator, '<') === 0 && $value >= Page::statusHidden && count($options['alwaysAllowIDs'])) {
+						// support the 'alwaysAllowIDs' option for specific page IDs when requested but would
+						// not otherwise appear in the results due to hidden or unpublished status
+						$allowIDs = array();
+						foreach($options['alwaysAllowIDs'] as $id) $allowIDs[] = (int) $id;
+						$s = "($s OR $table.id IN(" . implode(',', $allowIDs) . '))';
+					}
 				}
 
 				if($selector->not) $s = "NOT ($s)";
