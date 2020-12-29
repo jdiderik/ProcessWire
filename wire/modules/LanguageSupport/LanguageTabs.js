@@ -57,9 +57,15 @@ function setupLanguageTabs($form) {
 			$parent.prev('.InputfieldHeader').append($span);
 		}
 		
-		var $links = $this.find('a');
+		var $links = $this.find('a.langTabLink');
 		var timeout = null;
 		var $note = $parent.find('.langTabsNote');
+		
+		if(!$links.length) {
+			$links = $this.find('a[data-lang]'); // fallback if missing langTabLink class
+			if(!$links.length) $links = $this.find('a');
+			$links.addClass('langTabLink');
+		}
 		
 		$links.on('mouseover', function() {
 			if(timeout) clearTimeout(timeout);
@@ -179,7 +185,7 @@ function unhideLanguageTabs() {
  */
 jQuery(document).ready(function($) { 
 	$(document).on('click', '.langTabsToggle', toggleLanguageTabs);
-	$(document).on('dblclicklangtab', '.langTabs a', dblclickLanguageTab);
+	$(document).on('dblclicklangtab', 'a.langTabLink', dblclickLanguageTab);
 	$(document).on('reloaded', '.Inputfield', function() {
 		var $inputfield = $(this);
 		setTimeout(function() {

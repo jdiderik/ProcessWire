@@ -50,7 +50,7 @@
  * @property array $createRoles Array of Role IDs that may create pages using this template. #pw-group-access
  * @property array $rolesPermissions Override permissions: Array indexed by role ID with values as permission ID (add) or negative permission ID (revoke). #pw-group-access
  * @property int $noInherit Disable role inheritance? Specify 1 to prevent edit/create/add access from inheriting to children, or 0 for default inherit behavior. #pw-group-access
- * @property int $redirectLogin Redirect when no access: 0 = 404, 1 = login page, url = URL to redirect to. #pw-group-access
+ * @property int $redirectLogin Redirect when no access: 0 = 404, 1 = login page, url = URL to redirect to, int(>1) = ID of page to redirect to. #pw-group-access
  * @property int $guestSearchable Pages appear in search results even when user doesnt have access? (0=no, 1=yes) #pw-group-access
  * 
  * Family
@@ -81,7 +81,7 @@
  * @property int|bool $noAppendTemplateFile Disabe automatic append of $config->appendTemplateFile (if in use).  #pw-group-files
  * @property string $prependFile File to prepend to template file (separate from $config->prependTemplateFile).  #pw-group-files
  * @property string $appendFile File to append to template file (separate from $config->appendTemplateFile).  #pw-group-files
- * @property bool $pagefileSecure Use secure pagefiles for pages using this template? (3.0.150+) #pw-group-files
+ * @property int $pagefileSecure Use secure pagefiles for pages using this template? 0=No/not set, 1=Yes (for non-public pages), 2=Always (3.0.166+) #pw-group-files
  * 
  * Page Editor
  * 
@@ -272,7 +272,7 @@ class Template extends WireData implements Saveable, Exportable {
 		'noAppendTemplateFile' => 0, // disable automatic inclusion of $config->appendTemplateFile
 		'prependFile' => '', // file to prepend (relative to /site/templates/)
 		'appendFile' => '', // file to append (relative to /site/templates/)
-		'pagefileSecure' => false, // secure files connected with page? (3.0.150+)
+		'pagefileSecure' => 0, // secure files connected with page? 0=Off, 1=Yes for unpub/non-public pages, 2=Always (3.0.166+)
 		'tabContent' => '', 	// label for the Content tab (if different from 'Content')
 		'tabChildren' => '', 	// label for the Children tab (if different from 'Children')
 		'nameLabel' => '', // label for the "name" property of the page (if something other than "Name")
@@ -1374,6 +1374,23 @@ class Template extends WireData implements Saveable, Exportable {
 	 */
 	public function getPageClass($withNamespace = true) {
 		return $this->wire('templates')->getPageClass($this, $withNamespace);
+	}
+
+	/**
+	 * Check that all file asset paths are consistent with current pagefileSecure setting and access control
+	 * 
+	 * #pw-internal
+	 * 
+	 * @return int Returns quantity of renamed paths, or 0 if all is in order
+	 * @since 3.0.166
+	 * 
+	 */
+	public function checkPagefileSecure() {
+		PagefilesManager::numRenamedPaths(true);
+		foreach($this->wire()->pages->findMany("template=$this, include=all") as $p) {
+			PagefilesManager::_path($p);
+		}
+		return PagefilesManager::numRenamedPaths(true);
 	}
 
 	/**

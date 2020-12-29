@@ -2066,6 +2066,33 @@ class ProcessField extends Process implements ConfigurableModule {
 	}
 
 	/**
+	 * Compare two diff context arrays and return the differences
+	 * 
+	 * @param array $a1
+	 * @param array $a2
+	 * @return array
+	 * 
+	 */
+	protected function diffContextArray(array $a1, array $a2) {
+		$diff = array();
+		foreach($a1 as $k => $v) {
+			if(is_array($v)) {
+				if(!isset($a2[$k]) || !is_array($a2[$k])) {
+					$diff[$k] = $v;
+				} else {
+					$_diff = $this->diffContextArray($v, $a2[$k]);
+					if(count($_diff)) $diff[$k] = $_diff;
+				}
+			} else if(!array_key_exists($k, $a2)) {
+				$diff[$k] = $v;
+			} else if($a2[$k] !== $v) {
+				$diff[$k] = $v;
+			}
+		}
+		return $diff;
+	}
+
+	/**
 	 * Save field in the context of a fieldgroup only
 	 *
 	 */
@@ -2077,7 +2104,7 @@ class ProcessField extends Process implements ConfigurableModule {
 			$this->fields->saveFieldgroupContext($this->field, $this->fieldgroup, $this->contextNamespace); 
 			$this->saveRemoveOverrides();
 			$newContextArray = $this->fieldgroup->getFieldContextArray($this->field->id); 
-			$diffContextArray = array_diff_assoc($newContextArray, $oldContextArray); 
+			$diffContextArray = $this->diffContextArray($newContextArray, $oldContextArray); 
 			if(count($diffContextArray)) {
 				$this->fieldChangedContext($this->field, $this->fieldgroup, $diffContextArray); 
 			}
@@ -2874,6 +2901,64 @@ class ProcessField extends Process implements ConfigurableModule {
 		$result['items'] = array_merge($exactItems, $looseItems);
 		
 		return $result;
+	}
+
+	/**
+	 * URL to redirect to after non-authenticated user is logged-in, or false if module does not support
+	 *
+	 * @param Page $page
+	 * @return bool|string
+	 * @sine 3.0.167
+	 *
+	 */
+	public static function getAfterLoginUrl(Page $page) {
+		$sanitizer = $page->wire()->sanitizer;
+		$input = $page->wire()->input;
+		$segment = $input->urlSegment1;
+		$data = array();
+		if(empty($segment)) {
+			$data = array(
+				'templates_id' => (int) $input->get('templates_id'),
+				'fieldtype' => $input->get->name('fieldtype'),
+				'show_system' => (int) $input->get('show_system'),
+				'nosave' => (int) $input->get('nosave'),
+				'fieldgroup_id' => (int) $input->get('fieldgroup_id'),
+			);
+		} else if($segment === 'tags') {
+			$data = array(
+				'edit_tag' => $input->get->name('edit_tag'), 
+			);
+		} else if($segment === 'edit') {
+			$data = array(
+				'id' => (int) $input->get('id'),
+				'context_namespace' => $input->get->fieldName('context_namespace'), 
+				'context_label' => $input->get->text('context_label'),
+				'process_template' => (int) $input->get('process_template'),
+				'focus' => $input->get->fieldName('focus'),
+				'modal' => (int) $input->get('modal'),
+				'fieldgroup_id' => (int) $input->get('fieldgroup_id'),
+			);
+			if(!empty($data['context_label'])) $data['context_label'] = urlencode($data['context_label']);
+		} else if($segment === 'changeType' || $segment === 'change-type') {
+			$data = array(
+				'id' => (int) $input->get('id'),
+				'type' => $input->get->name('type'),
+			);
+		} else if($segment === 'sendTemplates' || $segment === 'send-templates') {
+			$templates = array();
+			foreach(explode(',', (string) $input->get('templates')) as $value) {
+				if(!empty($value)) $templates[] = $sanitizer->fieldName($value);
+			}
+			$data = array(
+				'id' => (int) $input->get('id'),
+				'templates' => implode(',', $templates),
+			);
+		} else if($segment === 'import' || $segment === 'export') {
+			// ok, no query string
+		} else {
+			$segment = '';
+		}
+		return $page->url() . $segment . (count($data) ? '?' . implode('&', $data) : '');
 	}
 
 	/**
