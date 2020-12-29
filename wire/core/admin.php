@@ -55,13 +55,15 @@ function _checkForHttpHostError(Config $config) {
 		$valid = true; 
 	} else if(isset($_SERVER['SERVER_NAME']) && $httpHost === strtolower($_SERVER['SERVER_NAME'])) {
 		$valid = true; 
+	} else if(in_array($httpHost, $config->httpHosts)) {
+		$valid = true; 
 	}
 
 	if(!$valid) $config->error(
 		__('Unrecognized HTTP host:') . "'"  . 
 		htmlentities($_SERVER['HTTP_HOST'], ENT_QUOTES, 'UTF-8') . "' - " . 
 		__('Please update your $config->httpHosts setting in /site/config.php') . " - " . 
-		"<a target='_blank' href='http://processwire.com/api/variables/config/#httphosts'>" . __('read more') . "</a>", 
+		"<a target='_blank' href='https://processwire.com/api/variables/config/#httphosts'>" . __('read more') . "</a>", 
 		Notice::allowMarkup
 		); 
 }
@@ -82,6 +84,19 @@ function _checkForTwoFactorAuth(Session $session) {
 		"<a href='$tfaUrl'>" . $sanitizer->entities1(__('Enable two-factor authentication')) . " </a>",
 		Notice::allowMarkup
 	);
+}
+
+/**
+ * Check if POST request exceeds PHP’s max_input_vars
+ * 
+ * @param WireInput $input
+ * 
+ */
+function _checkForMaxInputVars(WireInput $input) {
+	$max = (int) ini_get('max_input_vars');
+	if($max && count($_POST) >= $max) {
+		$input->error(sprintf(__('You have reached PHP’s “max_input_vars” setting of %d — please increase it.'), $max)); 
+	}
 }
 
 
@@ -118,9 +133,12 @@ if($page->process && $page->process != 'ProcessPageView') {
 			foreach($_POST as $k => $v) unset($_POST[$k]); 
 			foreach($_FILES as $k => $v) unset($_FILES[$k]); 
 			$input->post->removeAll();
+		} else if($input->requestMethod('POST') && $user->isLoggedin() && $user->hasPermission('page-edit')) {
+			_checkForMaxInputVars($input);
 		}
 
 		$controller = new ProcessController(); 
+		$wire->wire($controller);
 		$controller->setProcessName($page->process); 
 		$initFile = $config->paths->adminTemplates . 'init.php'; 
 		if(is_file($initFile)) {
@@ -139,9 +157,11 @@ if($page->process && $page->process != 'ProcessPageView') {
 		if($process) {} // ignore
 
 	} catch(Wire404Exception $e) {
+		$wire->setStatusFailed($e, "404 from $page->process", $page);
 		$wire->error($e->getMessage()); 
 
 	} catch(WirePermissionException $e) {
+		$wire->setStatusFailed($e, "Permission error from $page->process", $page); 
 
 		if($controller && $controller->isAjax()) {
 			$content = $controller->jsonMessage($e->getMessage(), true); 
@@ -155,6 +175,7 @@ if($page->process && $page->process != 'ProcessPageView') {
 		}
 
 	} catch(\Exception $e) {
+		$wire->setStatusFailed($e, "Error from $page->process", $page); 
 		$msg = $e->getMessage(); 
 		if($config->debug) {
 			$msg = $sanitizer->entities($msg);
@@ -185,7 +206,8 @@ if($ajax) {
 	ob_end_clean();
 }
 
-$config->js(array('httpHost', 'httpHosts'), true); 
+// config properties that should be mirrored to ProcessWire.config.property in JS
+$config->js(array('httpHost', 'httpHosts', 'https'), true); 
 
 if($controller && $controller->isAjax()) {
 	if(empty($content) && count($notices)) $content = $controller->jsonMessage($notices->last()->text); 

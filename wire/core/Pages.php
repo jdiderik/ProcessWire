@@ -8,7 +8,7 @@
  *
  * This is the most used object in the ProcessWire API. 
  *
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2020 by Ryan Cramer
  * https://processwire.com
  *
  * @link http://processwire.com/api/variables/pages/ Offical $pages Documentation
@@ -49,10 +49,13 @@
  * @method added(Page $page) Hook called when a new page has been added. 
  * @method moved(Page $page) Hook called when a page has been moved from one parent to another. 
  * @method templateChanged(Page $page) Hook called when a page template has been changed. 
+ * @method trashReady(Page $page) Hook called when a page is about to be moved to the trash.
  * @method trashed(Page $page) Hook called when a page has been moved to the trash. 
  * @method restored(Page $page) Hook called when a page has been moved OUT of the trash. 
- * @method deleteReady(Page $page) Hook called just before a page is deleted. 
- * @method deleted(Page $page) Hook called after a page has been deleted. 
+ * @method deleteReady(Page $page, array $options) Hook called just before a page is deleted. 
+ * @method deleted(Page $page, array $options) Hook called after a page has been deleted. 
+ * @method deleteBranchReady(Page $page, array $options) Hook called before a branch of pages deleted, on initiating page only. 
+ * @method deletedBranch(Page $page, array $options, $numDeleted) Hook called after branch of pages deleted, on initiating page only.
  * @method cloneReady(Page $page, Page $copy) Hook called just before a page is cloned. 
  * @method cloned(Page $page, Page $copy) Hook called after a page has been successfully cloned. 
  * @method renamed(Page $page) Hook called after a page has been successfully renamed. 
@@ -138,7 +141,21 @@ class Pages extends Wire {
 	 * @var PagesTrash
 	 * 
 	 */
-	protected $trasher; 
+	protected $trasher;
+
+	/**
+	 * @var PagesParents
+	 * 
+	 */
+	protected $parents;
+
+	/**
+	 * Array of PagesType managers
+	 * 
+	 * @var PagesType[]
+	 * 
+	 */
+	protected $types = array();
 
 	/**
 	 * Create the Pages object
@@ -209,15 +226,15 @@ class Pages extends Wire {
 	 * 
 	 * @param string|int|array|Selectors $selector Specify selector (standard usage), but can also accept page ID or array of page IDs.
 	 * @param array|string $options One or more options that can modify certain behaviors. May be associative array or "key=value" selector string.
-	 *  - `findOne` (boolean): Apply optimizations for finding a single page (default=false).
-	 *  - `findAll` (boolean): Find all pages with no exclusions, same as "include=all" option (default=false). 
-	 *  - `findIDs` (boolean|int): Specify 1 to return array of only page IDs, or true to return verbose array (default=false).
-	 *  - `getTotal` (boolean): Whether to set returning PageArray's "total" property (default=true, except when findOne=true).
-	 *  - `loadPages` (boolean): Whether to populate the returned PageArray with found pages (default=true). 
+	 *  - `findOne` (bool): Apply optimizations for finding a single page (default=false).
+	 *  - `findAll` (bool): Find all pages with no exclusions, same as "include=all" option (default=false). 
+	 *  - `findIDs` (bool|int): 1 to get array of page IDs, true to return verbose array, 2 to return verbose array with all cols in 3.0.153+. (default=false).
+	 *  - `getTotal` (bool): Whether to set returning PageArray's "total" property (default=true, except when findOne=true).
+	 *  - `loadPages` (bool): Whether to populate the returned PageArray with found pages (default=true). 
 	 *	   The only reason why you'd want to change this to false would be if you only needed the count details from 
 	 *	   the PageArray: getTotal(), getStart(), getLimit, etc. This is intended as an optimization for $pages->count().
 	 * 	   Does not apply if $selector argument is an array. 
-	 *  - `cache` (boolean): Allow caching of selectors and loaded pages? (default=true). Also sets loadOptions[cache].
+	 *  - `cache` (bool): Allow caching of selectors and loaded pages? (default=true). Also sets loadOptions[cache].
 	 *  - `allowCustom` (boolean): Allow use of _custom="another selector" in given $selector? For specific uses. (default=false)
 	 *  - `caller` (string): Optional name of calling function, for debugging purposes, i.e. "pages.count" (default=blank).
 	 *  - `include` (string): Optional inclusion mode of 'hidden', 'unpublished' or 'all'. (default=none). Typically you would specify this 
@@ -310,7 +327,7 @@ class Pages extends Wire {
 	}
 
 	/**
-	 * Like $pages->find() except returns array of IDs rather than Page objects.
+	 * Like find() except returns array of IDs rather than Page objects
 	 * 
 	 * - This is a faster method to use when you only need to know the matching page IDs. 
 	 * - The default behavior is to simply return a regular PHP array of matching page IDs in order. 
@@ -332,9 +349,10 @@ class Pages extends Wire {
 	 * #pw-group-retrieval
 	 * 
 	 * @param string|array|Selectors $selector Selector to find page IDs. 
-	 * @param array|bool $options Options to modify behavior. 
-	 *  - `verbose` (bool): Specify true to make return value array of associative arrays, each with verbose info. 
-	 *  - The verbose option above can also be specified by providing boolean true as the $options argument.
+	 * @param array|bool|int|string $options Options to modify behavior. 
+	 *  - `verbose` (bool|int|string): Specify true to make return value array of associative arrays, each with id, parent_id, templates_id. 
+	 *    Specify integer `2` or string `*` to return verbose array of associative arrays, each with all columns from pages table. 
+	 *  - The verbose option above can also be specified as alternative to the $options argument.
 	 *  - See `Pages::find()` $options argument for additional options. 
 	 * @return array Array of page IDs, or in verbose mode: array of arrays, each with id, parent_id and templates_id keys.
 	 * @since 3.0.46
@@ -342,14 +360,23 @@ class Pages extends Wire {
 	 */
 	public function findIDs($selector, $options = array()) {
 		$verbose = false;
-		if($options === true) $verbose = true;
-		if(!is_array($options)) $options = array();
+		if(!is_array($options)) {
+			// verbose option specified in $options array
+			$verbose = $options;
+			$options = array();
+		}
 		if(isset($options['verbose'])) {
 			$verbose = $options['verbose'];
 			unset($options['verbose']);
 		}
-		$options['findIDs'] = $verbose ? true : 1;
-		return $this->find($selector, $options);
+		if($verbose === 2 || $verbose === '*') {
+			$options['findIDs'] = 2;
+		} else {
+			$options['findIDs'] = $verbose ? true : 1;
+		}
+		/** @var array $ids */
+		$ids = $this->find($selector, $options);
+		return $ids;
 	}
 
 	/**
@@ -380,6 +407,131 @@ class Pages extends Wire {
 		return $this->loader->get($selector, $options); 
 	}
 	
+	/**
+	 * Get one ID of page matching given selector with no exclusions, like get() but returns ID rather than a Page
+	 *
+	 * This method is an alias of the has() method, and depending on what you are after, may make more
+	 * or less sense with your code readability. Use whichever better suits your case. 
+	 * 
+	 * #pw-group-retrieval
+	 *
+	 * @param string|array|Selectors $selector Specify selector to find first matching page ID
+	 * @param bool|array $options Specify boolean true to return all pages columns rather than just IDs.
+	 *   Or specify array of options (see find method for details), `verbose` option can optionally be in array. 
+	 * @return int|string|array
+	 * @see Pages::get(), Pages::has(), Pages::findIDs()
+	 * @since 3.0.156
+	 *
+	 */
+	public function getID($selector, $options = array()) {
+		if(is_array($options)) {
+			if(empty($options['caller'])) $options['caller'] = 'pages.getID';
+			$verbose = false;
+			if(isset($options['verbose'])) {
+				$verbose = $options['verbose'];
+				unset($options['verbose']);
+			}
+		} else {
+			$verbose = $options;
+			$options = array();
+		}
+		return $this->loader->has($selector, $verbose, $options);
+	}
+
+	/**
+	 * Given array or CSV string of Page IDs, return a PageArray
+	 *
+	 * #pw-group-retrieval
+	 *
+	 * @param array|string|WireArray $ids Any one of the following:
+	 *  - Single page ID (string or int)
+	 *  - Array of page IDs
+	 *  - Comma or pipe-separated string of page IDs
+	 *  - Array of associative arrays having id and templates_id: [ [ 'id' => 1, 'templates_id' => 2], [ 'id' => 3, 'templates_id' => 4 ] ]
+	 * @param array $options Options to affect behavior. The 'template' option is recommended when you have this info available.
+	 * - `template` (Template|int|string): Template object, name or ID to use for loaded pages. (default=null)
+	 * - `parent` (Page|int|string): Parent Page object, ID, or path to use for loaded pages. (default=null)
+	 * - `cache` (bool): Place loaded pages in memory cache? (default=true)
+	 * - `getFromCache` (bool): Allow use of previously cached pages in memory (rather than re-loading it from DB)? (default=true)
+	 * - `getNumChildren` (bool): Specify false to disable retrieval and population of 'numChildren' Page property. (default=true)
+	 * - `getOne` (bool): Specify true to return just one Page object, rather than a PageArray. (default=false)
+	 * - `autojoin` (bool): Allow use of autojoin option? (default=true)
+	 * - `joinFields` (array): Autojoin the field names specified in this array, regardless of field settings (requires autojoin=true). (default=empty)
+	 * - `joinSortfield` (bool): Whether the 'sortfield' property will be joined to the page. (default=true)
+	 * - `findTemplates` (bool): Determine which templates will be used (when no template specified) for more specific autojoins. (default=true)
+	 * - `pageClass` (string): Class to instantiate Page objects with. Leave blank to determine from template. (default=auto-detect)
+	 * - `pageArrayClass` (string): PageArray-derived class to store pages in (when 'getOne' is false). (default=PageArray)
+	 * - `pageArray` (PageArray|null): Populate this existing PageArray rather than creating a new one. (default=null)
+	 * - `page` (Page|null): Existing Page object to populate (also requires the getOne option to be true). (default=null)
+	 * @return PageArray|Page Returns PageArray unless the getOne option was specified in which case a Page is returned. 
+	 * @since 3.0.156 Previous versions can use $pages->getById() for similar behavior 
+	 *
+	 */
+	public function getByIDs($ids, array $options = array()) {
+		
+		$template = empty($options['template']) ? null : $options['template'];
+		$parent = empty($options['parent']) ? null : $options['parent'];
+		$parent_id = null;
+		
+		if($template) {
+			unset($options['template']);
+			if($template instanceof Template) {
+				// cool, cool
+			} else if(is_int($template) || is_string($template)) {
+				$template = $this->wire('templates')->get($template);
+			} else {
+				$template = null;
+			}
+		}
+	
+		if(!empty($options['parent_id'])) {
+			unset($options['parent_id']);
+			$parent_id = (int) $options['parent_id'];
+		} else if($parent) {
+			unset($options['parent']);
+			if($parent instanceof Page) {
+				$parent_id = $parent->id;
+			} else if(is_int($parent) || ctype_digit("$parent")) {
+				$parent_id = (int) "$parent";
+			} else if(is_string($parent) && $parent) {
+				$parent_id = $this->has($parent);
+			}
+			if(!$parent_id) $parent_id = null;
+		}
+		
+		if(count($options)) {
+			$options['template'] = $template && $template instanceof Template ? $template : null;
+			$options['parent_id'] = $parent_id;
+			return $this->loader->getById($ids, $options);
+		} else {
+			return $this->loader->getById($ids, $template, $parent_id); 
+		}
+	}
+
+	/**
+	 * Is there any page that matches the given $selector in the system? (with no exclusions)
+	 *
+	 * - This can be used as an “exists” type of method.
+	 * - Returns ID of first matching page if any exist, or 0 if none exist (returns array if `$verbose` is true). 
+	 * - Like with the `get()` method, no pages are excluded, so an `include=all` is not necessary in selector.
+	 * - If you need to quickly check if something exists, this method is preferable to using a count() or get().
+	 *
+	 * When `$verbose` option is used, an array is returned instead. Verbose return array includes page `id`, 
+	 * `parent_id` and `templates_id` indexes.
+	 * 
+	 * #pw-group-retrieval
+	 *
+	 * @param string|int|array|Selectors $selector
+	 * @param bool $verbose Return verbose array with page id, parent_id, templates_id rather than just page id? (default=false)
+	 * @return array|int
+	 * @since 3.0.153
+	 * @see Pages::count(), Pages::get()
+	 *
+	 */
+	public function has($selector, $verbose = false) {
+		return $this->loader->has($selector, $verbose); 
+	}
+
 	/**
 	 * Save a page object and its fields to database.
 	 *
@@ -630,7 +782,7 @@ class Pages extends Wire {
 	}
 	
 	/**
-	 * Given an array or CSV string of Page IDs, return a PageArray 
+	 * Given an array or CSV string of Page IDs, return a PageArray (internal API)
 	 * 
 	 * Note that this method is primarily for internal use and most of the options available are specific to the needs
 	 * of core methods that utilize them. All pages loaded by ProcessWire pass through this method. 
@@ -681,7 +833,7 @@ class Pages extends Wire {
 	 * ]);
 	 * ~~~~~
 	 * 
-	 * #pw-advanced
+	 * #pw-internal
 	 *
 	 * @param array|WireArray|string $_ids Array of Page IDs or CSV string of Page IDs.
 	 * @param Template|array|null $template Specify a template to make the load faster, because it won't have to attempt to join all possible fields... just those used by the template. 
@@ -837,14 +989,15 @@ class Pages extends Wire {
 	 * #pw-group-manipulation
 	 *
 	 * @param Page|PageArray|array $pages May be Page, PageArray or array of page IDs (integers).
-	 * @param null|int|string $modified Omit to update to now, or specify unix timestamp or strtotime() recognized time string
-	 * @throws WireException if given invalid format for $modified argument or failed database query
+	 * @param null|int|string $time Omit (null) to update to now, or specify unix timestamp or strtotime() recognized time string
+	 * @param string $type Date type to update, one of 'modified', 'created' or 'published' (default='modified') Added 3.0.146
+	 * @throws WireException|\PDOException if given invalid format for $modified argument or failed database query
 	 * @return bool True on success, false on fail
 	 * @since 3.0.0
 	 *
 	 */
-	public function ___touch($pages, $modified = null) {
-		return $this->editor()->touch($pages, $modified);
+	public function ___touch($pages, $time = null, $type = 'modified') {
+		return $this->editor()->touch($pages, $time, $type);
 	}
 	
 	/**
@@ -993,7 +1146,7 @@ class Pages extends Wire {
 	 * 
 	 * #pw-internal
 	 *
-	 * @param Page|PageArray|null $page Page to uncache, or omit to uncache all.
+	 * @param Page|PageArray|int|null $page Page to uncache, PageArray of pages to uncache, ID of page to uncache (3.0.153+), or omit to uncache all.
 	 * @param array $options Additional options to modify behavior: 
 	 *   - `shallow` (bool): By default, this method also calls $page->uncache(). To prevent that call, set this to true. 
 	 * @return int Number of pages uncached
@@ -1003,7 +1156,7 @@ class Pages extends Wire {
 		$cnt = 0;
 		if(is_null($page)) {
 			$cnt = $this->cacher->uncacheAll(null, $options);
-		} else if($page instanceof Page) {
+		} else if($page instanceof Page || is_int($page)) {
 			if($this->cacher->uncache($page, $options)) $cnt++;
 		} else if($page instanceof PageArray) {
 			foreach($page as $p) {
@@ -1228,30 +1381,43 @@ class Pages extends Wire {
 	 * 
 	 * #pw-internal
 	 *
-	 * @param array $options Optionally specify array of any of the following:
-	 *   - `pageClass` (string): Class to use for Page object (default='Page').
-	 *   - `template` (Template|id|string): Template to use. 
-	 *   - Plus any other Page properties or fields you want to set at this time
+	 * @param array|string|Template $options Optionally specify array of any of the following:
+	 *  - `template` (Template|id|string): Template to use via object, ID or name. 
+	 *  - `pageClass` (string): Class to use for Page. If not specified, default is from template setting, or 'Page' if no template.
+	 *  - Any other Page properties or fields you want to set (parent, name, title, etc.). Note that most page fields will need to
+	 *    have a `template` set first, so make sure to include it in your options array when providing other fields.
+	 *  - In PW 3.0.152+ you may specify the Template object, name or ID instead of an $options array. 
 	 * @return Page
 	 *
 	 */
-	public function newPage(array $options = array()) {
-		$class = 'Page';
-		if(!empty($options['pageClass'])) $class = $options['pageClass'];
-		if(isset($options['template'])) {
+	public function newPage($options = array()) {
+		if(!is_array($options)) {
+			if(is_object($options) && $options instanceof Template) {
+				$options = array('template' => $options); 
+			} else if($options && (is_string($options) || is_int($options))) {
+				$options = array('template' => $options); 
+			} else {
+				$options = array();
+			}
+		}
+		if(!empty($options['pageClass'])) {
+			$class = $options['pageClass'];
+		} else {
+			$class = 'Page';
+		}
+		if(!empty($options['template'])) {
 			$template = $options['template'];
 			if(!is_object($template)) {
 				$template = empty($template) ? null : $this->wire('templates')->get($template);
 			}
-			if($template && empty($options['pageClass']) && $template->pageClass) {
-				$class = $template->pageClass;
-				if(!wireClassExists($class)) $class = 'Page';
-			}	
+			if($template && empty($options['pageClass'])) {
+				$class = $template->getPageClass();
+			}
 		} else {
 			$template = null;
 		}
 		
-		$class = wireClassName($class, true);
+		if(strpos($class, "\\") === false) $class = wireClassName($class, true);
 		$page = $this->wire(new $class($template));
 		if(!$page instanceof Page) $page = $this->wire(new Page($template));
 		
@@ -1306,11 +1472,11 @@ class Pages extends Wire {
 	 *
 	 */
 	public function __invoke($key) {
-		if(empty($key)) return $this;
-		if(is_int($key)) return $this->get($key); 
-		if(is_array($key)) return $this->getById($key); 
-		if(strpos($key, '/') === 0 && ctype_alnum(str_replace(array('/', '-', '_', '.'), '', $key))) return $this->get($key);
-		return $this->find($key);
+		if(empty($key)) return $this; // no argument
+		if(is_int($key)) return $this->get($key); // page ID
+		if(is_array($key) && ctype_digit(implode('', $key))) return $this->getById($key); // array of page IDs
+		if(is_string($key) && strpos($key, '/') !== false && $this->sanitizer->pagePathName($key) === $key) return $this->get($key); // page path
+		return $this->find($key); // selector string or array
 	}
 
 	/**
@@ -1352,9 +1518,11 @@ class Pages extends Wire {
 	}
 	
 	/**
+	 * Get Pages API methods specific to generating and modifying page names
+	 * 
 	 * @return PagesNames
 	 *
-	 * #pw-internal
+	 * #pw-advanced
 	 *
 	 */
 	public function names() {
@@ -1379,8 +1547,37 @@ class Pages extends Wire {
 	 *
 	 */
 	public function trasher() {
-		if(is_null($this->trasher)) $this->trasher = $this->wire(new PagesTrash($this));
+		if(!$this->trasher) $this->trasher = $this->wire(new PagesTrash($this));
 		return $this->trasher;
+	}
+
+	/**
+	 * @return PagesParents
+	 *
+	 * #pw-internal
+	 *
+	 */
+	public function parents() {
+		if(!$this->parents) $this->parents = $this->wire(new PagesParents($this));
+		return $this->parents;
+	}
+
+	/**
+	 * Get array of all PagesType managers
+	 * 
+	 * #pw-internal
+	 * 
+	 * @param PagesType|string Specify a PagesType object to add a Manager, or specify class name to retrieve manager
+	 * @return array|PagesType|null|bool Returns requested type, null if not found, or boolean true if manager added. 
+	 * 
+	 */
+	public function types($type = null) {
+		if(!$type) return $this->types;
+		if(is_string($type)) return isset($this->types[$type]) ? $this->types[$type] : null;
+		if(!$type instanceof PagesType) return null;
+		$name = $type->className();
+		$this->types[$name] = $type;
+		return true;
 	}
 
 	/**
@@ -1426,9 +1623,8 @@ class Pages extends Wire {
 		/** @var WireCache $cache */
 		$cache = $this->wire('cache');
 		$cache->maintenance($page);
-		if($page->className() != 'Page') {
-			$manager = $page->getPagesManager();
-			if($manager instanceof PagesType) $manager->saved($page, $changes, $values);
+		foreach($this->types as $manager) {
+			if($manager->hasValidTemplate($page)) $manager->saved($page, $changes, $values);
 		}
 	}
 
@@ -1442,10 +1638,10 @@ class Pages extends Wire {
 	 */
 	public function ___added(Page $page) { 
 		$this->log("Added page", $page);
-		if($page->className() != 'Page') {
-			$manager = $page->getPagesManager();
-			if($manager instanceof PagesType) $manager->added($page);
+		foreach($this->types as $manager) {
+			if($manager->hasValidTemplate($page)) $manager->added($page);
 		}
+		$page->setQuietly('_added', true);
 	}
 
 	/**
@@ -1484,6 +1680,18 @@ class Pages extends Wire {
 		}
 	}
 
+
+	/**
+	 * Hook called when a Page is about to be trashed
+	 * 
+	 * @param Page $page
+	 * @since 3.0.163
+	 * 
+	 */
+	public function ___trashReady(Page $page) {
+		if($page) {} // ignore
+	}
+	
 	/**
 	 * Hook called when a page has been moved to the trash
 	 * 
@@ -1523,9 +1731,10 @@ class Pages extends Wire {
 	 */
 	public function ___saveReady(Page $page) {
 		$data = array();
-		if($page->className() != 'Page') {
-			$manager = $page->getPagesManager();
-			if($manager instanceof PagesType) $data = $manager->saveReady($page);
+		foreach($this->types as $manager) {
+			if(!$manager->hasValidTemplate($page)) continue;
+			$a = $manager->saveReady($page);
+			if(!empty($a) && is_array($a)) $data = array_merge($data, $a); 
 		}
 		return $data;
 	}
@@ -1539,12 +1748,13 @@ class Pages extends Wire {
 	 * #pw-hooker
 	 * 
 	 * @param Page $page Page that is about to be deleted. 
+	 * @param array $options Options passed to delete method (since 3.0.163)
 	 *
 	 */
-	public function ___deleteReady(Page $page) {
-		if($page->className() != 'Page') {
-			$manager = $page->getPagesManager();
-			if($manager instanceof PagesType) $manager->deleteReady($page);
+	public function ___deleteReady(Page $page, array $options = array()) {
+		if($options) {} // ignore
+		foreach($this->types as $manager) {
+			if($manager->hasValidTemplate($page)) $manager->deleteReady($page);
 		}
 	}
 
@@ -1554,17 +1764,52 @@ class Pages extends Wire {
 	 * #pw-hooker
 	 * 
 	 * @param Page $page Page that was deleted
+	 * @param array $options Options passed to delete method (since 3.0.163)
 	 *
 	 */
-	public function ___deleted(Page $page) { 
-		$this->log("Deleted page", $page); 
+	public function ___deleted(Page $page, array $options = array()) { 
+		if($options) {}
+		if(empty($options['_deleteBranch'])) $this->log("Deleted page", $page); 
 		/** @var WireCache $cache */
 		$cache = $this->wire('cache');
 		$cache->maintenance($page);
-		if($page->className() != 'Page') {
-			$manager = $page->getPagesManager();
-			if($manager instanceof PagesType) $manager->deleted($page);
+		foreach($this->types as $manager) {
+			if($manager->hasValidTemplate($page)) $manager->deleted($page);
 		}
+	}
+	
+	/**
+	 * Hook called before a branch of pages is about to be deleted, called on root page of branch only
+	 *
+	 * Note: this is called only on deletions that had 'recursive' option true and 1+ children.
+	 *
+	 * #pw-hooker
+	 *
+	 * @param Page $page Page that was deleted
+	 * @param array $options Options passed to delete method
+	 * @since 3.0.163
+	 *
+	 */
+	public function ___deleteBranchReady(Page $page, array $options) {
+		if($page && $options) {}
+	}
+	
+	/**
+	 * Hook called after a a branch of pages has been deleted, called on root page of branch only
+	 * 
+	 * Note: this is called only on deletions that had 'recursive' option true and 1+ children. 
+	 *
+	 * #pw-hooker
+	 *
+	 * @param Page $page Page that was the root of the branch
+	 * @param array $options Options passed to delete method
+	 * @param int $numDeleted Number of pages deleted
+	 * @since 3.0.163
+	 *
+	 */
+	public function ___deletedBranch(Page $page, array $options, $numDeleted) {
+		if($page && $options) {}
+		$this->log("Deleted branch with $numDeleted page(s)", $page);
 	}
 
 	/**

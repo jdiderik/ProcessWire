@@ -481,8 +481,9 @@ class WireFileTools extends Wire {
 			return false;
 		}
 
-		if(strpos($pathname, '//') !== false) {
-			// URLs or accidental extra slashes not allowed
+		$pos = strpos($pathname, '//');
+		if($pos !== false && $pos !== strpos($this->wire('config')->paths->assets, '//')) {
+			// URLs or accidental extra slashes not allowed, unless they also appear in a known safe system path
 			if($throw) throw new WireException('pathname may not contain double slash “//”');
 			return false;
 		}
@@ -499,14 +500,23 @@ class WireFileTools extends Wire {
 	/**
 	 * Return a new temporary directory/path ready to use for files
 	 * 
+	 * The directory will be automatically removed after a set period of time (default=120s)
+	 * 
 	 * #pw-advanced
+	 * 
+	 * ~~~~~
+	 * $td = $files->tempDir('hello-world'); 
+	 * $path = (string) $td; // or use $td->get();
+	 * file_put_contents($path . 'some-file.txt', 'Hello world'); 
+	 * ~~~~~
 	 *
 	 * @param Object|string $name Provide the object that needs the temp dir, or name your own string
 	 * @param array|int $options Options array to modify default behavior:
 	 *  - `maxAge` (integer): Maximum age of temp dir files in seconds (default=120)
 	 *  - `basePath` (string): Base path where temp dirs should be created. Omit to use default (recommended).
 	 *  - Note: if you specify an integer for $options, then 'maxAge' is assumed.
-	 * @return WireTempDir
+	 * @return WireTempDir If you typecast return value to a string, it is the temp dir path (with trailing slash).
+	 * @see WireTempDir
 	 *
 	 */
 	public function tempDir($name, $options = array()) {
@@ -811,7 +821,7 @@ class WireFileTools extends Wire {
 	 * @param string $filename Filename to write to
 	 * @param string|mixed $contents Contents to write to file
 	 * @param int $flags Flags to modify behavior:
-	 *  - `FILE_APPEND` (constant): Append to file if it already exists .
+	 *  - `FILE_APPEND` (constant): Append to file if it already exists.
 	 *  - `LOCK_EX` (constant): Acquire exclusive lock to file while writing.
 	 * @return int|bool Number of bytes written or boolean false on fail 
 	 * @throws WireException if given invalid $filename (since 3.0.118)
@@ -851,6 +861,8 @@ class WireFileTools extends Wire {
 	 *  - `allowedPaths` (array): Array of paths that are allowed (default is templates, core modules and site modules)
 	 *  - `allowDotDot` (bool): Allow use of ".." in paths? (default=false)
 	 *  - `throwExceptions` (bool): Throw exceptions when fatal error occurs? (default=true)
+	 *  - `cache` (int|string|Page): Specify non-zero value to cache rendered result for this many seconds, or see the `WireCache::renderFile()` 
+	 *     method `$expire` argument for more options you can specify here. (default=0, no cache) *Note: this option added in 3.0.130*
 	 * @return string|bool Rendered template file or boolean false on fatal error (and throwExceptions disabled)
 	 * @throws WireException if template file doesn't exist
 	 * @see WireFileTools::include()
@@ -871,6 +883,7 @@ class WireFileTools extends Wire {
 			),
 			'allowDotDot' => false,
 			'throwExceptions' => true,
+			'cache' => 0, 
 		);
 
 		$options = array_merge($defaults, $options);
@@ -913,14 +926,23 @@ class WireFileTools extends Wire {
 				return false;
 			}
 		}
+		
+		if($options['cache']) {
+			/** @var WireCache $cache */
+			$cache = $this->wire('cache');
+			$o = $options;
+			unset($o['cache']); 
+			$o['vars'] = $vars; 
+			return $cache->renderFile($filename, $options['cache'], $o); 
+		}
 
 		// render file and return output
-		$t = new TemplateFile();
+		$t = $this->wire(new TemplateFile()); /** @var TemplateFile $t */
 		$t->setThrowExceptions($options['throwExceptions']);
 		$t->setFilename($filename);
 
 		foreach($vars as $key => $value) {
-			$t->set($key, $value);
+			$t->data($key, $value);
 		}
 		
 		return $t->render();
@@ -929,12 +951,12 @@ class WireFileTools extends Wire {
 	/**
 	 * Include a PHP file passing it all API variables and optionally your own specified variables
 	 *
-	 * This is the same as PHP's `include()` function except for the following:
+	 * This is the same as PHP’s `include()` function except for the following:
 	 * 
 	 * - It receives all API variables and optionally your custom variables
-	 * - If your filename is not absolute, it doesn't look in PHP's include path, only in the current dir.
+	 * - If your filename is not absolute, it doesn’t look in PHP’s include path, only in the current dir.
 	 * - It only allows including files that are part of the PW installation: templates, core modules or site modules
-	 * - It will assume a ".php" extension if filename has no extension.
+	 * - It will assume a “.php” extension if filename has no extension.
 	 *
 	 * Note this function produces direct output. To retrieve output as a return value, use the
 	 * `$files->render()` function instead.
@@ -948,7 +970,7 @@ class WireFileTools extends Wire {
 	 *  - `autoExtension` (string): Extension to assume when no ext in filename, make blank for no auto assumption (default=php)
 	 *  - `allowedPaths` (array): Array of start paths include files are allowed from. Note current dir is always allowed.
 	 * @return bool Always returns true
-	 * @throws WireException if file doesn't exist or is not allowed
+	 * @throws WireException if file doesn’t exist or is not allowed
 	 *
 	 */
 	function ___include($filename, array $vars = array(), array $options = array()) {
@@ -971,7 +993,7 @@ class WireFileTools extends Wire {
 
 		// add .php extension if filename doesn't already have an extension
 		if($options['autoExtension'] && !strrpos(basename($filename), '.')) {
-			$filename .= "." . $options['autoExtension'];
+			$filename .= '.' . $options['autoExtension'];
 		}
 
 		if(strpos($filename, '..') !== false) {
@@ -1012,10 +1034,15 @@ class WireFileTools extends Wire {
 		// include the file
 		TemplateFile::pushRenderStack($filename); 
 		$func = $options['func'];
-		if($func == 'require') require($filename);
-			else if($func == 'require_once') require_once($filename);
-			else if($func == 'include_once') include_once($filename);
-			else include($filename);
+		if($func === 'require') {
+			require($filename);
+		} else if($func === 'require_once') {
+			require_once($filename);
+		} else if($func === 'include_once') {
+			include_once($filename);
+		} else {
+			include($filename);
+		}
 		TemplateFile::popRenderStack();
 
 		return true;
@@ -1165,7 +1192,8 @@ class WireFileTools extends Wire {
 		} else {
 			$f = '';
 		}
-		$compiler = new FileCompiler(dirname($file), $options);
+		/** @var FileCompiler $compiler */
+		$compiler = $this->wire(new FileCompiler(dirname($file), $options));
 		$compiledFile = $compiler->compile(basename($file));
 		if($f) $compiled[$f] = $compiledFile;
 		return $compiledFile;
@@ -1305,6 +1333,21 @@ class WireFileTools extends Wire {
 		$path = $this->unixDirName($path);
 		if($file === $path || strlen($file) <= strlen($path)) return false;
 		return strpos($file, $path) === 0;
+	}
+
+	/**
+	 * Get the current path / work directory
+	 * 
+	 * This is like PHP’s getcwd() function except that is in ProcessWire format as unix path with trailing slash.
+	 * 
+	 * #pw-group-filenames
+	 * 
+	 * @return string
+	 * @since 3.0.130
+	 * 
+	 */
+	public function currentPath() {
+		return $this->unixDirName(getcwd());
 	}
 
 }

@@ -109,6 +109,7 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 			$pageNumUrlPrefix = $this->get("pageNumUrlPrefix$language"); 
 			if($pageNumUrlPrefix) $pageNumUrlPrefixes[] = $pageNumUrlPrefix;
 			$fields->setNative("name$language"); 
+			$fields->setNative("status$language"); 
 		}
 		if(count($pageNumUrlPrefixes)) {
 			$pageNumUrlPrefixes[] = $config->pageNumUrlPrefix; // original/fallback prefix
@@ -277,6 +278,9 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 			} else {	
 				// inactive status only applies to the page itself
 				$active = $page->get("status$setLanguage") > 0; 
+			
+				// https://github.com/processwire/processwire-issues/issues/463
+				// $active = $page->get("status$setLanguage") > 0 || $page->template->noLang;
 			}
 			// if page is inactive for a language, and it's not editable, send a 404
 			if(!$active && !$page->editable() && $page->id != $config->http404PageID) {
@@ -349,6 +353,11 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 	public function getPagePath(Page $page, Language $language) {
 
 		$isDefault = $language->isDefault();
+		
+		if(!$isDefault && $page->template && $page->template->noLang) {
+			$language = $this->wire()->languages->getDefault();
+			$isDefault = true;
+		}
 
 		if($page->id == 1) {
 			// special case: homepage
@@ -412,7 +421,7 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 		if($event) {}
 		if($this->force404) {
 			$this->force404 = false; // prevent another 404 on the 404 page
-			throw new Wire404Exception();
+			throw new Wire404Exception('Not available in requested language', Wire404Exception::codeLanguage);
 			// $page = $event->wire('page');		
 			// if(!$page || ($page->id != $event->wire('config')->http404PageID)) {
 			//	throw new Wire404Exception();
@@ -681,9 +690,9 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 	public function hookPagePath(HookEvent $event) {
 		/** @var Page $page */
 		$page = $event->object; 
-		if($page->template == 'admin') return;
-		$language = $this->wire('user')->get('language'); 
-		if(!$language) $language = $this->wire('languages')->get('default'); 
+		if($page->template->name == 'admin') return;
+		$language = $this->wire()->user->language;
+		if(!$language) $language = $this->wire()->languages->getDefault();
 		$event->return = $this->getPagePath($page, $language); 
 	}
 
@@ -791,18 +800,33 @@ class LanguageSupportPageNames extends WireData implements Module, ConfigurableM
 	 *
 	 */
 	public function languageAdded(Page $language) {
+		
+		static $languagesAdded = array();
+		
 		if(!$language->id || $language->name == 'default') return;
-		try {
-			$name = "name" . (int) $language->id; 
-			$status = "status" . (int) $language->id; 
-			$database = $this->wire('database');
-			$database->exec("ALTER TABLE pages ADD $name VARCHAR(" . Pages::nameMaxLength . ") CHARACTER SET ascii"); 
-			$database->exec("ALTER TABLE pages ADD UNIQUE {$name}_parent_id ($name, parent_id)"); 
-			$database->exec("ALTER TABLE pages ADD $status INT UNSIGNED NOT NULL DEFAULT " . Page::statusOn); 
-			
-		} catch(\Exception $e) {
-			$this->error($e->getMessage(), Notice::log); 
+		if($language instanceof Language && $language->isDefault()) return;
+		if(isset($languagesAdded[$language->id])) return;
+		
+		$name = "name" . (int) $language->id;
+		$status = "status" . (int) $language->id;
+		$database = $this->wire('database');
+		$errors = 0;
+		$sqls = array(
+			"Add column $name" => "ALTER TABLE pages ADD $name VARCHAR(" . Pages::nameMaxLength . ") CHARACTER SET ascii",
+			"Add index for $name" => "ALTER TABLE pages ADD UNIQUE {$name}_parent_id ($name, parent_id)",
+			"Add column $status" => "ALTER TABLE pages ADD $status INT UNSIGNED NOT NULL DEFAULT " . Page::statusOn,
+		);
+		
+		foreach($sqls as $label => $sql) {
+			try {
+				$database->exec($sql);
+			} catch(\Exception $e) {
+				$this->error("$label: " . $e->getMessage(), Notice::log);
+				$errors++;
+			}
 		}
+		
+		if(!$errors) $languagesAdded[$language->id] = $language->id;
 	}
 
 	/**

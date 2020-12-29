@@ -87,7 +87,9 @@ var ProcessWireAdmin = {
 			}
 		}).on('click', '.ui-button', function() {
 			$(this).removeClass("ui-state-default").addClass("ui-state-active"); // .effect('highlight', {}, 100); 
-		}).on('click', 'a > button', function() {
+		});
+		/*
+		.on('click', 'a > button', function() {
 			var $a = $(this).parent();
 			var target = $a.attr('target');
 			if(typeof target != "undefined" && target == '_blank') {
@@ -97,6 +99,7 @@ var ProcessWireAdmin = {
 				window.location = $a.attr('href');
 			}
 		});
+		*/
 	},
 
 	/**
@@ -337,13 +340,17 @@ var ProcessWireAdmin = {
 						
 						if(this.url == 'navJSON') {
 							// click triggers another navJSON load
-						} else {
-							var url = this.url.indexOf('/') === 0 ? this.url : data.url + this.url;
+						} else if(this.url.indexOf('/') === 0) {
+							url = this.url;
+						} else if(this.url.length) {
+							url = data.url + this.url;
 						}
 						
 						var $li = $("<li class='ui-menu-item'></li>"); 
-						var $a = $("<a href='" + url + "'>" + icon + this.label + "</a>");
+						var $a = $("<a>" + icon + this.label + "</a>");
 						var $ulSub = null;
+						
+						if(url.length) $a.attr('href', url);
 					
 						if(this.navJSON) {
 							$a.attr('data-json', this.navJSON).addClass('pw-has-items pw-has-ajax-items');
@@ -448,7 +455,7 @@ if(typeof ProcessWire != "undefined") {
 	 * Confirmation dialog
 	 * 
 	 * ~~~~~
-	 * if(ProcessWire.confirm('Send this message now?', function() {
+	 * ProcessWire.confirm('Send this message now?', function() {
 	 *   // user clicked Ok
 	 * }, function() {
 	 *   // user clicked Cancel

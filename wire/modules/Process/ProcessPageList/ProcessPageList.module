@@ -3,12 +3,12 @@
 /**
  * ProcessWire Page List Process
  *
- * Generates the ajax/js hierarchal page lists used throughout ProcessWire
+ * Generates the ajax/js hierarchical page lists used throughout ProcessWire
  * 
  * For more details about how Process modules work, please see: 
  * /wire/core/Process.php 
  * 
- * ProcessWire 3.x, Copyright 2018 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2019 by Ryan Cramer
  * https://processwire.com
  * 
  * @property bool $showRootPage Whether root page (like home) should be shown.
@@ -24,6 +24,8 @@
  * 
  * @method string ajaxAction($action)
  * @method PageArray find($selectorString, Page $page)
+ * 
+ * @todo Option to configure whether "Pub" action should appear for non-superusers
  *
  */
 
@@ -38,7 +40,7 @@ class ProcessPageList extends Process implements ConfigurableModule {
 	public static function getModuleInfo() {
 		return array(
 			'title' => 'Page List',
-			'summary' => 'List pages in a hierarchal tree structure',
+			'summary' => 'List pages in a hierarchical tree structure',
 			'version' => 122,
 			'permanent' => true,
 			'permission' => 'page-edit',
@@ -184,7 +186,7 @@ class ProcessPageList extends Process implements ConfigurableModule {
 		if($this->openPage->id && $this->speed > 50) $this->speed = floor($this->speed / 2);
 		$this->page = $pages->get("id=" . ($this->id > 0 ? $this->id : 1) . ", status<" . Page::statusMax); 
 
-		if(!$this->page) throw new Wire404Exception("Unable to load page {$this->id}"); 
+		if(!$this->page) throw new Wire404Exception("Unable to load page {$this->id}", Wire404Exception::codeSecondary); 
 		if(!$this->page->listable()) throw new WirePermissionException("You don't have access to list page {$this->page->url}"); 
 		$this->page->setOutputFormatting(false);
 
@@ -194,12 +196,12 @@ class ProcessPageList extends Process implements ConfigurableModule {
 		}
 
 		$p = $this->wire('page'); 
-		if($p->name == 'list' && $p->process == $this) {
+		if($p->name == 'list' && "$p->process" == "$this") {
 			// ensure that we use the page's title is always consistent in the admin (i.e. 'Pages' not 'Page List')
 			$p->title = $p->parent->title; 
 		}
 		
-		if($ajax && $this->id > 1 && $p->process == $this && $this->wire('input')->get('mode') != 'select') {
+		if($ajax && $this->id > 1 && "$p->process" == "$this" && $this->wire('input')->get('mode') != 'select') {
 			// remember last requested id
 			$this->wire('session')->setFor($this, 'lastID', $this->id);
 		}
@@ -262,7 +264,7 @@ class ProcessPageList extends Process implements ConfigurableModule {
 				foreach($this->openPage->parents() as $parent) {
 					if($parent->id > 1 && $parent->id != $this->id) $openPageIDs[] = $parent->id;
 				}
-			} else if(!$isAjax && $this->wire('page')->process == $this) {
+			} else if(!$isAjax && ((string) $this->wire('page')->process) == "$this") {
 				if($this->id) {
 					// leave openPageIDs as empty array
 				} else {
@@ -324,7 +326,7 @@ class ProcessPageList extends Process implements ConfigurableModule {
 	}
 
 	/**
-	 * Get the appropriate PageListRender classs
+	 * Get the appropriate PageListRender class
 	 * 
 	 * @param Page $page
 	 * @param null|int $limit
@@ -339,13 +341,26 @@ class ProcessPageList extends Process implements ConfigurableModule {
 		$class = $this->allowRenderTypes[$this->render];
 		$className = wireClassName($class, true);
 		
+		/** @var User $user */
+		$user = $this->wire('user');
+		$superuser = $user->isSuperuser();
+		
 		if(!class_exists($className, false)) require_once(dirname(__FILE__) . "/$class.php");
 		
 		if(is_null($limit)) $limit = $this->limit;
 		if(is_null($start)) $start = $this->start;
 		
 		if($limit) {
-			$children = $this->find("start=$start, limit=$limit, status<" . Page::statusMax, $page);
+			$selector = "start=$start, limit=$limit, status<" . Page::statusMax;
+			
+			if($this->useTrash && !$superuser) { 
+				$trashID = $this->wire('config')->trashPageID;
+				if($page->id == $trashID && $user->hasPermission('page-edit') && $page->listable()) {
+					$selector .= ", check_access=0";
+				}
+			}
+			
+			$children = $this->find($selector, $page);
 		} else {
 			$children = $this->wire('pages')->newPageArray();
 		}
@@ -356,7 +371,7 @@ class ProcessPageList extends Process implements ConfigurableModule {
 		$renderer->setLimit($limit);
 		$renderer->setPageLabelField($this->getPageLabelField());
 		$renderer->setLabel('trash', $this->trashLabel);
-		$renderer->setUseTrash($this->useTrash || $this->wire('user')->isSuperuser());
+		$renderer->setUseTrash($this->useTrash || $superuser);
 		$renderer->setQtyType($this->qtyType);
 		
 		return $renderer;
@@ -542,10 +557,11 @@ class ProcessPageList extends Process implements ConfigurableModule {
 				$url = $page->editUrl();
 				$editable = true;
 			} else if($page->viewable()) {
-				$url = $page->url();
+				// do not show view URLs per #818
+				// $url = $page->url();
 			}
 			
-			$numChildren = $id > 1 ? $page->numChildren : 0;
+			$numChildren = $id > 1 ? $renderer->numChildren($page) : 0;
 			$label = $renderer->getPageLabel($page, array('noTags' => true, 'noIcon' => true));
 			if(strlen($label) > $maxLabelLength) {
 				$label = substr($label, 0, $maxLabelLength); 
@@ -573,7 +589,7 @@ class ProcessPageList extends Process implements ConfigurableModule {
 				'edit' => $editable
 			);
 			
-			if($page->id > 1 && $page->numChildren) {
+			if($numChildren) {
 				$a['navJSON'] = $data['url'] . "?parent_id=$page->id";
 			}
 			

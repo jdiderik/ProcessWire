@@ -17,7 +17,7 @@
  * This file is licensed under the MIT license
  * https://processwire.com/about/license/mit/
  *
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2019 by Ryan Cramer
  * https://processwire.com
  *
  */
@@ -29,18 +29,6 @@ if(!defined("PROCESSWIRE")) die();
 /** @var Config $config */
 
 /**
- * Enable debug mode?
- *
- * Debug mode causes additional info to appear for use during dev and debugging.
- * This is almost always recommended for sites in development. However, you should
- * always have this disabled for live/production sites.
- *
- * @var bool
- *
- */
-$config->debug = false;
-
-/**
  * Prepend template file
  *
  * PHP file in /site/templates/ that will be loaded before each page's template file.
@@ -50,6 +38,20 @@ $config->debug = false;
  *
  */
 $config->prependTemplateFile = '_init.php';
+
+/**
+ * Allow core API variables to also be accessed as functions? 
+ * 
+ * Recommended. This enables API varibles like $pages to also be accessed as pages(),
+ * as an example. And so on for most other core variables.
+ * 
+ * Benefits are better type hinting, always in scope, and potentially shorter API calls.
+ * See the file /wire/core/FunctionsAPI.php for details on these functions.
+ * 
+ * @var bool 
+ * 
+ */
+$config->useFunctionsAPI = true; 
 
 
 /*** INSTALLER CONFIG ********************************************************************/

@@ -3,7 +3,7 @@
 /**
  * ProcessWire WireMail
  * 
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2019 by Ryan Cramer
  * https://processwire.com
  * 
  * #pw-summary A module type that handles sending of email in ProcessWire
@@ -52,6 +52,8 @@
  * 
  * @method int send() Send email. 
  * @method string htmlToText($html) Convert HTML email body to TEXT email body. 
+ * @method string sanitizeHeaderName($name) #pw-internal
+ * @method string sanitizeHeaderValue($value) #pw-internal
  * 
  * @property array $to To email address.
  * @property array $toName Optional person’s name to accompany “to” email address
@@ -67,6 +69,7 @@
  * @property array $param Associative array of aditional params (likely not applicable to most WireMail modules). 
  * @property array $attachments Array of file attachments (if populated and where supported) #pw-advanced
  * @property string $newline Newline character, populated only if different from CRLF. #pw-advanced
+ * 
  *
  */
 
@@ -91,17 +94,37 @@ class WireMail extends WireData implements WireMailInterface {
 		'attachments' => array(), 
 		);
 
+	/**
+	 * Construct
+	 * 
+	 */
 	public function __construct() {
 		$this->mail['header']['X-Mailer'] = "ProcessWire/" . $this->className();
 		parent::__construct();
 	}
 
+	/**
+	 * Get property
+	 * 
+	 * @param string $key
+	 * @return mixed|null
+	 * 
+	 */
 	public function get($key) {
 		if($key === 'headers') $key = 'header';
 		if(array_key_exists($key, $this->mail)) return $this->mail[$key]; 
 		return parent::get($key);
 	}
-	
+
+	/**
+	 * Set property
+	 * 
+	 * @param string $key
+	 * @param mixed $value
+	 *
+	 * @return $this|WireData
+	 * 
+	 */
 	public function set($key, $value) {
 		if($key === 'headers' || $key === 'header') {
 			if(is_array($value)) $this->headers($value); 
@@ -117,7 +140,7 @@ class WireMail extends WireData implements WireMailInterface {
 	public function __set($key, $value) { return $this->set($key, $value); }
 
 	/**
-	 * Sanitize an email address or throw WireException if invalid
+	 * Sanitize an email address or throw WireException if invalid or in blacklist
 	 * 
 	 * @param string $email
 	 * @return string
@@ -125,24 +148,66 @@ class WireMail extends WireData implements WireMailInterface {
 	 * 
 	 */
 	protected function sanitizeEmail($email) {
+		if(!strlen($email)) return '';
 		$email = strtolower(trim($email)); 
+		if(strpos($email, ':') && preg_match('/^(.+):\d+$/', $email, $matches)) {
+			// sending email in particular might sometimes be auto-generated from hostname
+			// so remove trailing port, i.e. ':8888', if present since it will not validate
+			$email = $matches[1]; 
+		}
 		$clean = $this->wire('sanitizer')->email($email); 
-		if($email != $clean) {
-			$clean = $this->wire('sanitizer')->entities($email); 
-			throw new WireException("Invalid email address ($clean)");
+		if($email !== $clean) {
+			throw new WireException("Invalid email address: " . $this->wire('sanitizer')->entities($email));
+		}
+		/** @var WireMailTools $mail */
+		$mail = $this->wire('mail');
+		if($mail && $mail->isBlacklistEmail($email)) {
+			throw new WireException("Email address not allowed: " . $this->wire('sanitizer')->entities($email));
 		}
 		return $clean;
 	}
 
 	/**
-	 * Sanitize string for use in a email header
+	 * Sanitize and normalize a header name
+	 *
+	 * @param string $name
+	 * @return string
+	 * @since 3.0.132
+	 *
+	 */
+	protected function ___sanitizeHeaderName($name) {
+		/** @var Sanitizer $sanitizer */
+		$sanitizer = $this->wire('sanitizer');
+		$name = $sanitizer->emailHeader($name, true);
+		// ensure consistent capitalization for header names
+		$name = ucwords(str_replace('-', ' ', $name));
+		$name = str_replace(' ', '-', $name);
+		return $name;
+	}
+
+	/**
+	 * Sanitize an email header header value
+	 *
+	 * @param string $value
+	 * @return string
+	 * @since 3.0.132
+	 *
+	 */
+	protected function ___sanitizeHeaderValue($value) {
+		return $this->wire('sanitizer')->emailHeader($value); 
+	}
+
+	/**
+	 * Alias of sanitizeHeaderValue() method for backwards compatibility
 	 * 
+	 * #pw-internal
+	 *
 	 * @param string $header
 	 * @return string
-	 * 
+	 *
 	 */
 	protected function sanitizeHeader($header) {
-		return $this->wire('sanitizer')->emailHeader($header); 
+		return $this->sanitizeHeaderValue($header);
 	}
 
 	/**
@@ -157,7 +222,7 @@ class WireMail extends WireData implements WireMailInterface {
 		if(strpos($email, '<') !== false && strpos($email, '>') !== false) {
 			// email has separate from name and email
 			if(preg_match('/^(.*?)<([^>]+)>.*$/', $email, $matches)) {
-				$name = $this->sanitizeHeader($matches[1]);
+				$name = $this->sanitizeHeaderValue($matches[1]);
 				$email = $matches[2]; 
 			}
 		}
@@ -178,7 +243,7 @@ class WireMail extends WireData implements WireMailInterface {
 	protected function bundleEmailAndName($email, $name) {
 		$email = $this->sanitizeEmail($email); 
 		if(!strlen($name)) return $email;
-		$name = $this->sanitizeHeader($name); 
+		$name = $this->sanitizeHeaderValue($name); 
 		$delim = '';
 		if(strpos($name, ',') !== false) {
 			// name contains a comma, so quote the value
@@ -204,7 +269,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * @param string $name Optionally provide a TO name, applicable
 	 *	only when specifying #1 (single email) for the first argument. 
 	 * @return $this 
-	 * @throws WireException if any provided emails were invalid
+	 * @throws WireException if any provided emails were invalid or in blacklist
 	 *
 	 */
 	public function to($email = null, $name = null) {
@@ -238,8 +303,10 @@ class WireMail extends WireData implements WireMailInterface {
 
 			if(empty($toName)) $toName = $name; // use function arg if not overwritten
 			$toEmail = $this->sanitizeEmail($toEmail); 
-			$this->mail['to'][$toEmail] = $toEmail;
-			$this->mail['toName'][$toEmail] = $this->sanitizeHeader($toName); 
+			if(strlen($toEmail)) {
+				$this->mail['to'][$toEmail] = $toEmail;
+				$this->mail['toName'][$toEmail] = $this->sanitizeHeaderValue($toName);
+			}
 		}
 
 		return $this; 
@@ -262,7 +329,7 @@ class WireMail extends WireData implements WireMailInterface {
 		$emails = $this->mail['to']; 
 		if(!count($emails)) throw new WireException("Please set a 'to' address before setting a name."); 
 		$email = end($emails); 
-		$this->mail['toName'][$email] = $this->sanitizeHeader($name); 
+		$this->mail['toName'][$email] = $this->sanitizeHeaderValue($name); 
 		return $this;
 	}
 
@@ -272,7 +339,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * @param string $email Must be a single email address or "User Name <user@example.com>" string.
 	 * @param string|null An optional FROM name (same as setting/calling fromName)
 	 * @return $this 
-	 * @throws WireException if provided email was invalid
+	 * @throws WireException if provided email was invalid or in blacklist
 	 *
 	 */
 	public function from($email, $name = null) {
@@ -297,7 +364,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 *
 	 */
 	public function fromName($name) {
-		$this->mail['fromName'] = $this->sanitizeHeader($name); 
+		$this->mail['fromName'] = $this->sanitizeHeaderValue($name); 
 		return $this; 
 	}
 
@@ -307,7 +374,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * @param string $email Must be a single email address or "User Name <user@example.com>" string.
 	 * @param string|null An optional Reply-To name (same as setting/calling replyToName method)
 	 * @return $this
-	 * @throws WireException if provided email was invalid
+	 * @throws WireException if provided email was invalid or in blacklist
 	 *
 	 */
 	public function replyTo($email, $name = null) {
@@ -316,7 +383,7 @@ class WireMail extends WireData implements WireMailInterface {
 		} else {
 			$email = $this->sanitizeEmail($email);
 		}
-		if($name) $this->mail['replyToName'] = $this->sanitizeHeader($name); 
+		if($name) $this->mail['replyToName'] = $this->sanitizeHeaderValue($name); 
 		$this->mail['replyTo'] = $email;
 		if(empty($name) && !empty($this->mail['replyToName'])) $name = $this->mail['replyToName']; 
 		if(strlen($name)) $email = $this->bundleEmailAndName($email, $name); 
@@ -333,7 +400,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 */
 	public function replyToName($name) {
 		if(strlen($this->mail['replyTo'])) return $this->replyTo($this->mail['replyTo'], $name); 
-		$this->mail['replyToName'] = $this->sanitizeHeader($name);
+		$this->mail['replyToName'] = $this->sanitizeHeaderValue($name);
 		return $this; 
 	}
 
@@ -345,7 +412,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 *
 	 */
 	public function subject($subject) {
-		$this->mail['subject'] = $this->sanitizeHeader($subject); 	
+		$this->mail['subject'] = $this->sanitizeHeaderValue($subject); 	
 		return $this; 
 	}
 
@@ -403,15 +470,13 @@ class WireMail extends WireData implements WireMailInterface {
 			if(is_array($key)) {
 				$this->headers($key);
 			} else {
+				$key = $this->sanitizeHeaderName($key);
 				unset($this->mail['header'][$key]);
 			}
-		} else { 
-			$k = $this->wire('sanitizer')->name($this->sanitizeHeader($key)); 
-			// ensure consistent capitalization for all header keys
-			$k = ucwords(str_replace('-', ' ', $k)); 
-			$k = str_replace(' ', '-', $k); 
-			$v = $this->sanitizeHeader($value); 
-			$this->mail['header'][$k] = $v; 
+		} else {
+			$key = $this->sanitizeHeaderName($key);
+			$value = $this->sanitizeHeaderValue($value); 
+			if(strlen($key)) $this->mail['header'][$key] = $value; 
 		}
 		return $this; 
 	}
@@ -545,7 +610,7 @@ class WireMail extends WireData implements WireMailInterface {
 		
 		foreach($this->to as $to) {
 			$toName = isset($this->mail['toName'][$to]) ? $this->mail['toName'][$to] : '';
-			if($toName) $to = $this->bundleEmailAndName($to, $toName); // bundle to "User Name <user@example.com"
+			if($toName) $to = $this->bundleEmailAndName($to, $toName); // bundle to "User Name <user@example.com>"
 			if($param) {
 				if(@mail($to, $subject, $body, $header, $param)) $numSent++;
 			} else {
@@ -734,9 +799,7 @@ class WireMail extends WireData implements WireMailInterface {
 	 * 
 	 */
 	protected function ___htmlToText($html) {
-		$textTools = new WireTextTools();
-		$this->wire($textTools);
-		$text = $textTools->markupToText($html);
+		$text = $this->wire('sanitizer')->getTextTools()->markupToText($html);
 		$text = str_replace("\n", "\r\n", $text); 
 		$text = $this->strReplace($text, $this->multipartBoundary()); 
 		return $text;
@@ -827,4 +890,5 @@ class WireMail extends WireData implements WireMailInterface {
 	public function quotedPrintableString($text) {
 		return '=?utf-8?Q?' . quoted_printable_encode($text) . '?=';
 	}
+
 }

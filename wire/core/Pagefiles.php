@@ -108,6 +108,12 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 	 * 
 	 */
 	protected $formatted = false;
+
+	/**
+	 * @var Template|null
+	 * 
+	 */
+	protected $fieldsTemplate = null;
 	
 	/**
 	 * Construct a Pagefiles object
@@ -117,6 +123,7 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 	 */
 	public function __construct(Page $page) {
 		$this->setPage($page); 
+		parent::__construct();
 	}
 
 	/**
@@ -565,7 +572,7 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 	 */ 
 	public function cleanBasename($basename, $originalize = false, $allowDots = true, $translate = false) {
 
-		$basename = strtolower($basename); 
+		$basename = function_exists('mb_strtolower') ? mb_strtolower($basename) : strtolower($basename);
 		$dot = strrpos($basename, '.'); 
 		$ext = $dot ? substr($basename, $dot) : ''; 
 		$basename = basename($basename, $ext);
@@ -764,7 +771,8 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 			if(!$isTemp) return false; // if not a temp file, we can exit now
 			if(!$checkDeletable) return $isTemp; // if not checking deletable, we can exit now
 		}
-		
+
+		$user = $this->wire('user');
 		$now = time();
 		$session = $this->wire('session');
 		$pageID = $this->page ? $this->page->id : 0;
@@ -796,6 +804,8 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 			// set temporary status to true
 			$pagefile->created = Pagefile::createdTemp;
 			$pagefile->modified = $now; 
+			$pagefile->createdUser = $user;
+			$pagefile->modifiedUser = $user;
 			//                          mtime                  atime
 			@touch($pagefile->filename, Pagefile::createdTemp, $now);
 			$isTemp = true;
@@ -808,6 +818,8 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 			// set temporary status to false
 			$pagefile->created = $now;
 			$pagefile->modified = $now; 
+			$pagefile->createdUser = $user;
+			$pagefile->modifiedUser = $user;
 			@touch($pagefile->filename, $now);
 			$isTemp = false;
 			
@@ -915,6 +927,44 @@ class Pagefiles extends WireArray implements PageFieldValueInterface {
 	public function formatted($set = null) {
 		if(is_bool($set)) $this->formatted = $set;
 		return $this->formatted;
+	}
+
+	/**
+	 * Get Template object used for Pagefile custom fields, if available (false if not)
+	 * 
+	 * #pw-internal
+	 * 
+	 * @return bool|Template
+	 * @since 3.0.142
+	 * 
+	 */
+	public function getFieldsTemplate() {
+		if($this->fieldsTemplate === null) {
+			/** @var Field $field */
+			$field = $this->getField();
+			if($field) {
+				$this->fieldsTemplate = false;
+				/** @var FieldtypeFile $fieldtype */
+				$fieldtype = $field->type;
+				$template = $fieldtype && $fieldtype instanceof FieldtypeFile ? $fieldtype->getFieldsTemplate($field) : null;
+				if($template) $this->fieldsTemplate = $template;
+			}
+		}
+		return $this->fieldsTemplate;
+	}
+
+	/**
+	 * Get mock/placeholder Page object used for Pagefile custom fields
+	 * 
+	 * @return Page
+	 * @since 3.0.142
+	 * 
+	 */
+	public function getFieldsPage() {
+		$field = $this->getField();
+		/** @var FieldtypeFile $fieldtype */
+		$fieldtype = $field->type;
+		return $fieldtype->getFieldsPage($field);
 	}
 
 	/**

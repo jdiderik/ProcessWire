@@ -28,6 +28,14 @@ class SelectableOptionManager extends Wire {
 	protected $useLanguages = false;
 
 	/**
+	 * Cache of loaded options
+	 * 
+	 * @var array
+	 * 
+	 */
+	protected $optionsCache = array();
+
+	/**
 	 * Options removed that have not yet been deleted
 	 * 
 	 * Populated after a call to $this->setOptions() with the $allowDelete argument false.
@@ -37,11 +45,12 @@ class SelectableOptionManager extends Wire {
 	 */
 	protected $removedOptionIDs = array();
 	
-	public function __construct() {
+	public function wired() {
 		if($this->wire('modules')->isInstalled('LanguageSupportFields')) {
-			$this->useLanguages = true; 
+			$this->useLanguages = true;
 			$this->addHookAfter('Languages::updated', $this, 'updateLanguages');
 		}
+		parent::wired();
 	}
 
 	/**
@@ -92,46 +101,62 @@ class SelectableOptionManager extends Wire {
 	 *
 	 */
 	public function getOptions(Field $field, array $filters = array()) {
-
+		
+		$hasFilters = count($filters) > 0;
+		
+		if(isset($this->optionsCache[$field->id]) && !$hasFilters) {
+			return $this->optionsCache[$field->id];
+		}
+		
 		$defaults = array(
 			'id' => array(),
 			'title' => array(),
 			'value' => array(),
+			'or' => false, // change conditions from AND to OR?
 		);
 
 		$sortKey = true;
 		$sorted = array();
 		$filters = array_merge($defaults, $filters);
+		$wheres = array();
 
 		// make sure that all filters are arrays
 		foreach($defaults as $key => $unused) {
 			if(!is_array($filters[$key])) $filters[$key] = array($filters[$key]); 
 		}
 
-		$sql = 'SELECT * FROM ' . self::optionsTable . ' WHERE fields_id=:fields_id ';
-
 		if(count($filters['id'])) {
-			$sql .= 'AND option_id IN(';
+			$s = 'option_id IN(';
 			foreach($filters['id'] as $id) {
 				$id = (int) $id;
-				$sql .= "$id,";
+				$s .= "$id,";
 				$sorted[$id] = ''; // placeholder
 			}
-			$sql = rtrim($sql, ',') . ')';
+			$s = rtrim($s, ',') . ')';
 			$sortKey = 'filters-id';
+			$wheres[] = $s;
 		} 
-	
+
 		foreach(array('title', 'value') as $property) {
 			if(!count($filters[$property])) continue;
-			$sql .= "AND `$property` IN(";
+			$s = "`$property` IN(";
 			foreach($filters[$property] as $val) {
-				$sql .= $this->wire('database')->quote($val) . ',';
+				$s .= $this->wire('database')->quote($val) . ',';
 				$sorted[$val] = ''; // placeholder
 			}
-			$sql = rtrim($sql, ',') . ')';
+			$s = rtrim($s, ',') . ')';
 			$sortKey = "filters-$property";
+			$wheres[] = $s;
 		}
-			
+
+		$sql = 'SELECT * FROM ' . self::optionsTable . ' WHERE fields_id=:fields_id ';
+		if(count($wheres) > 1) {
+			$andOr = $filters['or'] ? ' OR ' : ' AND ';
+			$sql .= 'AND (' . implode($andOr, $wheres) . ') ';
+		} else if(count($wheres) === 1) {
+			$sql .= 'AND ' . reset($wheres);
+		}
+		
 		if($sortKey === true) $sql .= 'ORDER BY sort ASC';
 
 		$query = $this->wire('database')->prepare($sql);
@@ -165,6 +190,8 @@ class SelectableOptionManager extends Wire {
 		}
 		
 		$options->resetTrackChanges();
+		
+		if(!$hasFilters) $this->optionsCache[$field->id] = $options; 
 
 		return $options;
 	}
@@ -173,7 +200,7 @@ class SelectableOptionManager extends Wire {
 	 * Perform a partial match on title of options
 	 * 
 	 * @param Field $field
-	 * @param string $property Either 'title' or 'value'
+	 * @param string $property Either 'title' or 'value'. May also be blank (to imply 'either') if operator is '=' or '!='
 	 * @param string $operator
 	 * @param string $value Value to find
 	 * @return SelectableOptionArray
@@ -533,6 +560,8 @@ class SelectableOptionManager extends Wire {
 	 *
 	 */
 	public function updateOptions(Field $field, $options) {
+		
+		unset($this->optionsCache[$field->id]); 
 
 		$database = $this->wire('database');
 		$sql = "UPDATE " . self::optionsTable . " SET sort=:sort, title=:title, `value`=:value ";
@@ -586,6 +615,7 @@ class SelectableOptionManager extends Wire {
 	 *
 	 */
 	public function deleteOptions(Field $field, $options) {
+		unset($this->optionsCache[$field->id]); 
 		$ids = array();
 		foreach($options as $option) {
 			if(!$option instanceof SelectableOption) continue;
@@ -606,6 +636,7 @@ class SelectableOptionManager extends Wire {
 	 */
 	public function deleteOptionsByID(Field $field, array $ids) {
 
+		unset($this->optionsCache[$field->id]); 
 		$database = $this->wire('database');
 		$table = $database->escapeTable($field->getTable());
 		$cleanIDs = array();
@@ -653,6 +684,8 @@ class SelectableOptionManager extends Wire {
 		
 		// options that have pre-assigned IDs
 		$optionsByID = array();
+
+		unset($this->optionsCache[$field->id]);
 
 		// determine if any added options already have IDs
 		foreach($options as $option) {

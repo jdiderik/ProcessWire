@@ -11,7 +11,7 @@
  * If that file exists, the installer will not run. So if you need to re-run this installer for any
  * reason, then you'll want to delete that file. This was implemented just in case someone doesn't delete the installer.
  * 
- * ProcessWire 3.x, Copyright 2018 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2019 by Ryan Cramer
  * https://processwire.com
  * 
  * @todo have installer set session name
@@ -105,26 +105,26 @@ class Installer {
 		
 		require("./wire/modules/AdminTheme/AdminThemeUikit/install-head.inc"); 
 
-		if(isset($_POST['step'])) switch($_POST['step']) {
-			
-			case 0: $this->initProfile(); break;
-
-			case 1: $this->compatibilityCheck(); break;
-
-			case 2: $this->dbConfig();  break;
-
-			case 4: $this->dbSaveConfig();  break;
-
-			case 5: require("./index.php");
-				/** @var ProcessWire $wire */
-				$wire->modules->refresh();
-				$this->adminAccountSave($wire); 
-				break;
-
-			default: 
-				$this->welcome();
-
-		} else $this->welcome();
+		$step = $this->post('step');
+		
+		if($step === null) {
+			$this->welcome();
+		} else {
+			$step = (int) $step;
+			switch($step) {
+				case 0: $this->initProfile(); break;
+				case 1: $this->compatibilityCheck(); break;
+				case 2: $this->dbConfig();  break;
+				case 4: $this->dbSaveConfig();  break;
+				case 5: require("./index.php");
+					/** @var ProcessWire $wire */
+					$wire->modules->refresh();
+					$this->adminAccountSave($wire);
+					break;
+				default:
+					$this->welcome();
+			} 
+		}
 
 		require("./wire/modules/AdminTheme/AdminThemeUikit/install-foot.inc"); 
 	}
@@ -266,10 +266,10 @@ class Installer {
 		} else if(is_dir("./site/")) {
 			$this->alertOk("Found /site/ — already installed? ");
 
-		} else if(isset($_POST['profile'])) {
+		} else if($this->post('profile')) {
 			
 			$profiles = $this->findProfiles();
-			$profile = preg_replace('/[^-a-zA-Z0-9_]/', '', $_POST['profile']);
+			$profile = $this->post('profile', 'name'); 
 			if(empty($profile) || !isset($profiles[$profile]) || !is_dir(dirname(__FILE__) . "/$profile")) {
 				$this->alertErr("Profile not found");
 				$this->selectProfile();
@@ -322,7 +322,7 @@ class Installer {
 		}
 
 		$this->checkFunction("filter_var", "Filter functions (filter_var)");
-		$this->checkFunction("mysqli_connect", "MySQLi (not required by core, but may be required by some 3rd party modules)");
+		$this->checkFunction("mysqli_connect", "MySQLi (not used by core, but may still be used by some older 3rd party modules)");
 		$this->checkFunction("imagecreatetruecolor", "GD 2.0 or newer"); 
 		$this->checkFunction("json_encode", "JSON support");
 		$this->checkFunction("preg_match", "PCRE support"); 
@@ -334,7 +334,7 @@ class Installer {
 
 		if(function_exists('apache_get_modules')) {
 			if(in_array('mod_rewrite', apache_get_modules())) $this->ok("Found Apache module: mod_rewrite"); 
-				else $this->err("Apache mod_rewrite does not appear to be installed and is required by ProcessWire."); 
+				else $this->err("Apache 'mod_rewrite' module does not appear to be installed and is required by ProcessWire."); 
 		} else {
 			// apache_get_modules doesn't work on a cgi installation.
 			// check for environment var set in htaccess file, as submitted by jmarjie. 
@@ -342,7 +342,11 @@ class Installer {
 			if($mod_rewrite) {
 				$this->ok("Found Apache module (cgi): mod_rewrite");
 			} else {
-				$this->err("Unable to determine if Apache mod_rewrite (required by ProcessWire) is installed. On some servers, we may not be able to detect it until your .htaccess file is place. Please click the 'check again' button at the bottom of this screen, if you haven't already."); 
+				$this->err(
+					"Unable to determine if Apache mod_rewrite (required by ProcessWire) is installed. " . 
+					"On some servers, we may not be able to detect it until your .htaccess file is place. " . 
+					"Please click the 'check again' button at the bottom of this screen, if you haven't already."
+				); 
 			}
 		}
 		
@@ -538,11 +542,35 @@ class Installer {
 		$this->sectionStop();
 
 		$this->sectionStart('fa-server HTTP Host Names');
-		$this->p("What host names will this installation run on now and in the future? Please enter one host per line. You may also choose to leave this blank to auto-detect on each request, but we recommend using this whitelist for the best security in production environments."); 
-		$this->p("This field is recommended but not required. You can set this later by editing the file <u>/site/config.php</u> (setting \$config->httpHosts).", "detail"); 
+		$this->p(
+			"What host names will this installation run on now and in the future? Please enter one host per line. " . 
+			"You can also modify this setting later by editing the <code>\$config->httpHosts</code> setting in the <u>/site/config.php</u> file."
+		);
 		$rows = substr_count($values['httpHosts'], "\n") + 2; 
 		$this->textarea('httpHosts', '', $values['httpHosts'], $rows); 
 		$this->sectionStop();
+		
+		$this->sectionStart('fa-bug Debug mode?');
+		$this->p(
+			"When debug mode is enabled, errors and exceptions are visible in ProcessWire’s output. This is helpful when developing a website or testing ProcessWire. " . 
+			"When debug mode is NOT enabled, fatal errors/exceptions halt the request with an ambiguous http 500 error, and non-fatal errors are not shown. " . 
+			"Regardless of debug mode, fatal errors are always logged and always visible to superusers. " . 
+			"Debug mode should not be enabled for live or production sites, but at this stage (installation) it is worthwhile to have it enabled. " 
+		);
+		$noChecked = empty($values['debugMode']) ? "checked='checked'" : "";
+		$yesChecked = empty($noChecked) ? "checked='checked'" : "";
+		$this->p(
+			"<label><input type='radio' name='debugMode' $yesChecked value='1'> <strong>Enabled</strong> " . 
+				"<span class='uk-text-small uk-text-muted'>(recommended while sites are in development or while testing ProcessWire)</span></label><br />" .
+			"<label><input type='radio' name='debugMode' $noChecked value='0'> <strong>Disabled</strong> " . 
+				"<span class='uk-text-small uk-text-muted'>(recommended once a site goes live or becomes publicly accessible)</span></label> " 
+		);
+		$this->p(
+			"You can also enable or disable debug mode at any time by editing the <u>/site/config.php</u> file and setting " .
+			"<code>\$config->debug = true;</code> or <code>\$config->debug = false;</code>"
+		);
+		$this->sectionStop();
+		
 		$this->btn("Continue", 4); 
 		$this->p("Note: After you click the button above, be patient &hellip; it may take a minute.", "detail");
 	}
@@ -559,13 +587,17 @@ class Installer {
 		// file permissions
 		$fields = array('chmodDir', 'chmodFile');
 		foreach($fields as $field) {
-			$value = (int) $_POST[$field];
-			if(strlen("$value") !== 3) $this->alertErr("Value for '$field' is invalid");
-			else $this->$field = "0$value";
+			$value = $this->post($field, 'int');
+			if(strlen("$value") !== 3) {
+				$this->alertErr("Value for '$field' is invalid");
+			} else {
+				$this->$field = "0$value";
+			}
 			$values[$field] = $value;
 		}
 
-		$timezone = (int) $_POST['timezone'];
+		// timezone
+		$timezone = $this->post('timezone', 'int');
 		$timezones = $this->timezones();
 		if(isset($timezones[$timezone])) {
 			$value = $timezones[$timezone]; 
@@ -578,8 +610,9 @@ class Installer {
 			$values['timezone'] = 'America/New_York';
 		}
 
+		// http hosts
 		$values['httpHosts'] = array();
-		$httpHosts = trim($_POST['httpHosts']);
+		$httpHosts = $this->post('httpHosts', 'textarea');
 		if(strlen($httpHosts)) {
 			$httpHosts = str_replace(array("'", '"'), '', $httpHosts);
 			$httpHosts = explode("\n", $httpHosts);
@@ -589,12 +622,15 @@ class Installer {
 			}
 			$values['httpHosts'] = $httpHosts;
 		}
+		
+		// debug mode
+		$values['debugMode'] = $this->post('debugMode', 'int');
 
 		// db configuration
 		$fields = array('dbUser', 'dbName', 'dbPass', 'dbHost', 'dbPort', 'dbEngine', 'dbCharset');
 		
 		foreach($fields as $field) {
-			$value = get_magic_quotes_gpc() ? stripslashes($_POST[$field]) : $_POST[$field]; 
+			$value = $this->post($field, 'string');
 			$value = substr($value, 0, 255); 
 			if(strpos($value, "'") !== false) $value = str_replace("'", "\\" . "'", $value); // allow for single quotes (i.e. dbPass)
 			$values[$field] = trim($value); 
@@ -661,7 +697,7 @@ class Installer {
 		$query = $database->query("SHOW TABLES");
 		$tables = $query->fetchAll(\PDO::FETCH_COLUMN);
 		$numTables = count($tables);
-		$dbTablesAction = isset($_POST['dbTablesAction']) ? $_POST['dbTablesAction'] : '';
+		$dbTablesAction = $this->post('dbTablesAction', 'string');
 		
 		if($numTables && $dbTablesAction) {
 			if($dbTablesAction === 'remove') {
@@ -750,11 +786,22 @@ class Installer {
 	 */
 	protected function dbSaveConfigFile(array $values) {
 
-		if(self::TEST_MODE) return true; 
+		if(self::TEST_MODE) return true;
+		
+		$file = __FILE__; 
+		$time = time();
+		$host = empty($values['httpHosts']) ? '' : implode(',', $values['httpHosts']);
 
-		$salt = md5(mt_rand() . microtime(true)); 
-
-		$cfg = 	"\n/**" . 
+		if(function_exists('random_bytes')) {
+			$authSalt = sha1(random_bytes(random_int(40, 128)));
+			$tableSalt = sha1(random_int(0, 65535) . "$host$file$time"); 
+		} else {
+			$authSalt = md5(mt_rand() . microtime(true));
+			$tableSalt = md5(mt_rand() . "$host$file$time"); 
+		}
+		
+		$cfg =
+			"\n/**" . 
 			"\n * Installer: Database Configuration" . 
 			"\n * " . 
 			"\n */" . 
@@ -771,11 +818,24 @@ class Installer {
 			"\n" . 
 			"\n/**" . 
 			"\n * Installer: User Authentication Salt " . 
-			"\n * " . 
-			"\n * Must be retained if you migrate your site from one server to another" . 
+			"\n * " .
+			"\n * This value was randomly generated for your system on " . date('Y/m/d') . "." . 
+			"\n * This should be kept as private as a password and never stored in the database." . 
+			"\n * Must be retained if you migrate your site from one server to another." . 
+			"\n * Do not change this value, or user passwords will no longer work." .
 			"\n * " . 
 			"\n */" . 
-			"\n\$config->userAuthSalt = '$salt'; " . 
+			"\n\$config->userAuthSalt = '$authSalt'; " .
+			"\n" .
+			"\n/**" . 
+			"\n * Installer: Table Salt (General Purpose) " .
+			"\n * " .
+			"\n * Use this rather than userAuthSalt when a hashing salt is needed for non user " .
+			"\n * authentication purposes. Like with userAuthSalt, you should never change " . 
+			"\n * this value or it may break internal system comparisons that use it. " . 
+			"\n * " .
+			"\n */" . 
+			"\n\$config->tableSalt = '$tableSalt'; " .
 			"\n" . 
 			"\n/**" . 
 			"\n * Installer: File Permission Configuration" . 
@@ -816,6 +876,18 @@ class Installer {
 			foreach($values['httpHosts'] as $host) $cfg .= "'$host', ";
 			$cfg = rtrim($cfg, ", ") . ");\n\n";
 		}
+		
+		$cfg .=
+			"\n/**" .
+			"\n * Installer: Debug mode?" .
+			"\n * " . 
+			"\n * When debug mode is true, errors and exceptions are visible. " . 
+			"\n * When false, they are not visible except to superuser and in logs. " . 
+			"\n * Should be true for development sites and false for live/production sites. " . 
+			"\n * " .
+			"\n */" .
+			"\n\$config->debug = " . ($values['debugMode'] ? 'true;' : 'false;') . 
+			"\n\n";
 		
 		if(($fp = fopen("./site/config.php", "a")) && fwrite($fp, $cfg)) {
 			fclose($fp); 
@@ -863,9 +935,10 @@ class Installer {
 			if(is_dir($profile . "files")) $this->profileImportFiles($profile);
 				else $this->mkdir("./site/assets/files/"); 
 			
-			$this->mkdir("./site/assets/cache/"); 
-			$this->mkdir("./site/assets/logs/"); 
-			$this->mkdir("./site/assets/sessions/"); 
+			$this->mkdir("./site/assets/cache/", true, true); 
+			$this->mkdir("./site/assets/logs/", true, true);
+			$this->mkdir("./site/assets/backups/", true, true); 
+			$this->mkdir("./site/assets/sessions/", true, true); 
 			
 		} else {
 			$this->ok("A profile is already imported, skipping..."); 
@@ -890,6 +963,16 @@ class Installer {
 		} else {
 			// they are installing site-default already 
 		}
+
+		// install the site/.htaccess (not really required but potentially useful fallback)
+		$dir = "./site/";
+		$defaultDir = "./site-default/"; 
+		if(is_file($dir . 'htaccess.txt')) {
+			$this->renameFile($dir . 'htaccess.txt', $dir . '.htaccess'); 
+		} else if(is_file($defaultDir . 'htaccess.txt')) {
+			$this->copyFile($defaultDir . 'htaccess.txt', $dir . '.htaccess');
+		}
+		
 		$this->sectionStop();
 		$this->adminAccount();
 	}
@@ -1036,18 +1119,25 @@ class Installer {
 		
 		$this->sectionStart("fa-bath Cleanup");
 		$this->p("Directories and files listed below are no longer needed and should be removed. If you choose to leave any of them in place, you should delete them before migrating to a production environment.", "detail"); 
-		$this->p($this->getRemoveableItems($wire, true)); 
+		$this->p($this->getRemoveableItems(true)); 
 		$this->sectionStop();
 			
 		$this->btn("Continue", 5); 
 	}
-	
-	protected function getRemoveableItems($wire, $getMarkup = false, $removeNow = false) {
+
+	/**
+	 * Get post-install optionally removable items
+	 * 
+	 * @param bool $getMarkup Get markup of options/form inputs rather than array of items?
+	 * @param bool $removeNow Allow processing of submitted form (via getMarkup) to remove items now?
+	 * @return array|string
+	 * 
+	 */
+	protected function getRemoveableItems($getMarkup = false, $removeNow = false) {
 
 		$root = dirname(__FILE__) . '/';
-		$isPost = $wire->input->post->remove_items !== null;
-		$postItems = $isPost ? $wire->input->post->remove_items : array();
-		if(!is_array($postItems)) $postItems = array();
+		$isPost = $this->post('remove_items') !== null;
+		$postItems = $this->post('remove_items', 'array');
 		$out = '';
 		
 		$items = array(
@@ -1099,7 +1189,7 @@ class Installer {
 						$success = true; 
 					}
 					if($success) {
-						$this->ok("Completed: " . $item['label']); 
+						// $this->ok("Completed: " . $item['label']); 
 					} else {
 						$this->err("Unable to remove $item[file] - please remove manually, as it is no longer needed"); 
 					}
@@ -1111,7 +1201,9 @@ class Installer {
 			}
 		}
 		
+		if(empty($out)) $out = "None found"; 
 		if($getMarkup) return $out; 
+		
 		return $items; 
 	}
 
@@ -1201,22 +1293,36 @@ class Installer {
 		$this->sectionStop();
 
 		$this->sectionStart("fa-life-buoy Complete &amp; Secure Your Installation");
-		$this->getRemoveableItems($wire, false, true); 
+		$this->getRemoveableItems(false, true); 
 
 		$this->ok("Note that future runtime errors are logged to <b>/site/assets/logs/errors.txt</b> (not web accessible).");
-		$this->ok("For more configuration options see <b>/wire/config.php</b> and place any edits in /site/config.php.");
+		$this->ok("For more configuration options see <b>/wire/config.php</b> and place any edits in <u>/site/config.php</u>.");
+		$this->ok("Consider making your <b>/site/config.php</b> file non-writable, and readable only to you and Apache.");
+		$this->ok("View and edit your <b>.htaccess</b> file to force HTTPS, setup redirects, and more.");
+			
 		$this->p(
-			"Please make your <b>/site/config.php</b> file non-writable, and readable only to you and Apache.<br />" . 
-			"<a target='_blank' href='https://processwire.com/docs/security/file-permissions/#securing-your-site-config.php-file'>" . 
-			"How to secure your /site/config.php file <i class='fa fa-angle-right'></i></a>"
+			"<a target='_blank' href='https://processwire.com/docs/security/'>" . 
+			"Lean more about securing your ProcessWire installation <i class='fa fa-angle-right'></i></a>"
 		);
 		$this->sectionStop();
 		
 		if(is_writable("./site/modules/")) wireChmod("./site/modules/", true); 
 
-		$this->sectionStart("fa-coffee Use The Site!");
-		$this->ok("Your admin URL is <a href='./$adminName/'>/$adminName/</a>"); 
-		$this->p("If you'd like, you may change this later by editing the admin page and changing the name.", "detail"); 
+		$this->sectionStart("fa-coffee Get Started!");
+		$this->ok(
+			"Your admin URL is <a target='_blank' href='./$adminName/'>/$adminName/</a>"
+		);
+		$this->ok(
+			"Learn more about ProcessWire in the <a target='_blank' href='https://processwire.com/docs/'>documentation</a> " . 
+			"and <a target='_blank' href='https://processwire.com/api/ref/'>API reference</a>. " 
+		);
+		$this->ok(
+			"Visit our <a target='_blank' href='https://processwire.com/talk/'>support forums</a> for friendly help and discussion."
+		);
+		$this->ok(
+			"<a target='_blank' href='https://processwire.com/community/newsletter/subscribe/'>Subscribe to keep up-to-date</a> " . 
+			"with new versions and important updates."
+		);
 		$this->sectionStop();
 		
 		$this->btn("Login to Admin", 1, 'sign-in', false, true, "./$adminName/"); 
@@ -1236,13 +1342,14 @@ class Installer {
 
 	/**
 	 * @param string $str
+	 * @param string $icon
 	 * 
 	 */
-	protected function alertOk($str) {
+	protected function alertOk($str, $icon = 'check') {
 		if($this->inSection) {
 			$this->ok($str);
 		} else {
-			echo "\n<div class='uk-alert uk-alert-primary'><i class='fa fa-fw fa-check'></i> $str</div>";
+			echo "\n<div class='uk-alert uk-alert-primary'><i class='fa fa-fw fa-$icon'></i> $str</div>";
 		}
 	}
 	
@@ -1312,15 +1419,15 @@ class Installer {
 	 * Report success
 	 * 
 	 * @param string $str
+	 * @param string $icon
 	 * @return bool
 	 *
 	 */
-	protected function ok($str) {
+	protected function ok($str, $icon = 'check') {
 		if(!$this->inSection) {
 			$this->alertOk($str);
 		} else {
-			//echo "\n<li class='ui-state-highlight'><i class='fa fa-check-square-o'></i> $str</li>";
-			echo "\n<div class=''><i class='fa fa-fw fa-check'></i> $str</div>";
+			echo "\n<div class=''><i class='fa fa-fw fa-$icon'></i> $str</div>";
 		}
 		return true; 
 	}
@@ -1341,7 +1448,7 @@ class Installer {
 		if($float) $class .= " uk-float-left";
 		$type = 'submit';
 		if($href) $type = 'button';
-		if($href) echo "<a href='$href'>";
+		if($href) echo "<a href='$href' target='_blank'>";
 		echo "\n<p><button name='step' type='$type' class='ui-button ui-widget ui-state-default $class ui-corner-all' value='$value'>";
 		echo "<span class='ui-button-text'><i class='fa fa-$icon'></i> $label</span>";
 		echo "</button></p>";
@@ -1498,7 +1605,74 @@ class Installer {
 	protected function clear() {
 		echo "\n<div style='clear: both;'></div>";
 	}
-
+	
+	protected function post($key, $sanitizer = '') {
+		
+		$value = isset($_POST[$key]) ? $_POST[$key] : null;
+		
+		if($value === null && empty($sanitizer)) return null;
+		
+		if(version_compare(PHP_VERSION, "5.4.0", "<") && function_exists('get_magic_quotes_gpc')) {
+			if(get_magic_quotes_gpc()) $value = stripslashes($value);
+		}
+		
+		switch($sanitizer) {
+			case 'intSigned':
+				$value = (int) $value;
+				break;
+			case 'int':	
+				$value = (int) $value;
+				if($value < 0) $value = 0;
+				break;
+			case 'text':
+				$value = (string) $value;
+				if(strlen($value)) {
+					$value = str_replace(array("\r", "\n", "\t"), ' ', "$value");
+					$value = trim(strip_tags($value));
+					if(strlen($value) > 255) $value = substr($value, 0, 255);
+				}
+				break;
+			case 'textarea':	
+				$value = (string) $value;
+				if(strlen($value)) {
+					$value = strip_tags($value);
+					$value = str_replace(array("\r\n", "\r"), "\n", $value);
+					if(strlen($value) > 4096) $value = substr($value, 0, 4096);
+					$value = trim($value);
+				}
+				break;
+			case 'string':	
+				$value = trim((string) $value);
+				break;
+			case 'pageName':	
+				$value = strtolower($value); 
+				// no-break: passthrough to 'name' intentional...
+			case 'name':	
+				$value = trim((string) $value);
+				if(strlen($value)) {
+					$value = preg_replace('/[^-._a-z0-9]/', '-', $value);
+					while(strpos($value, '--') !== false) $value = str_replace('--', '-', $value);
+					$value = trim($value, '-');
+				}
+				break;
+			case 'fieldName':
+				$value = trim((string) $value);
+				if(strlen($value)) {
+					$value = preg_replace('/[^_a-zA-Z0-9]/', '_', $value);
+					while(strpos($value, '__') !== false) $value = str_replace('__', '_', $value);
+					$value = trim($value, '_');
+				}
+				break;
+			case 'bool':	
+				$value = $value ? true : false;
+				break;
+			case 'array':	
+				$value = is_array($value) ? $value : array();
+				break;
+		}
+		
+		return $value;
+	}
 
 	/******************************************************************************************************************
 	 * FILE FUNCTIONS
@@ -1508,21 +1682,60 @@ class Installer {
 	/**
 	 * Create a directory and assign permission
 	 * 
-	 * @param string $path
-	 * @param bool $showNote
+	 * @param string $path Path to create
+	 * @param bool $showNote Show notification about what was done?
+	 * @param bool $block Add an htaccess file that blocks http access? (default=false)
 	 * @return bool
 	 *
 	 */
-	protected function mkdir($path, $showNote = true) {
+	protected function mkdir($path, $showNote = true, $block = false) {
 		if(self::TEST_MODE) return true;
-		if(is_dir($path) || mkdir($path)) {
+		$path = rtrim($path, '/') . '/';
+		$isDir = is_dir($path);
+		if($isDir || mkdir($path)) {
 			chmod($path, octdec($this->chmodDir));
-			if($showNote) $this->alertOk("Created directory: $path"); 
-			return true; 
+			if($showNote && !$isDir) $this->alertOk("Created directory: $path"); 
+			$result = true;
 		} else {
 			if($showNote) $this->alertErr("Error creating directory: $path"); 
-			return false; 
+			$result = false;
 		}
+		$file = $path . '.htaccess';
+		if($result && $block && !file_exists($file)) {
+			$data = array(
+				'# Start ProcessWire:pwball (install)',
+				'# Block all access (fallback if root .htaccess missing)',
+				'<IfModule mod_authz_core.c>',
+				'  Require all denied',
+				'</IfModule>',
+				'<IfModule !mod_authz_core.c>',
+				'  Order allow,deny',
+				'  Deny from all',
+				'</IfModule>',
+				'# End ProcessWire:pwball',
+			);
+			file_put_contents($file, implode("\n", $data));
+			chmod($file, octdec($this->chmodFile));
+		}
+		return $result;
+	}
+	
+	protected function copyFile($src, $dst) {
+		if(!@copy($src, $dst)) {
+			$this->alertErr("Unable to copy $src => $dst (please copy manually if possible)"); 
+			return false;
+		}
+		chmod($dst, octdec($this->chmodFile));
+		return true;
+	}
+	
+	protected function renameFile($src, $dst) {
+		if(!@rename($src, $dst)) {
+			$this->alertErr("Unable to rename $src => $dst (please rename manually if possible)");
+			return false;
+		}
+		chmod($dst, octdec($this->chmodFile));
+		return true;
 	}
 
 	/**
@@ -1560,10 +1773,17 @@ class Installer {
 
 		closedir($dir);
 		return true; 
-	} 
-	
+	}
+
+	/**
+	 * Get all timezone selections
+	 * 
+	 * @return array
+	 * 
+	 */
 	protected function timezones() {
 		$timezones = timezone_identifiers_list();
+		if(!is_array($timezones)) return array('UTC');
 		$extras = array(
 			'US Eastern|America/New_York',
 			'US Central|America/Chicago',

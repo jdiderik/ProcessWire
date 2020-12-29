@@ -16,6 +16,7 @@
  * @property string|Password $pass Set the user’s password. 
  * @property PageArray $roles Get the roles this user has. 
  * @property Language $language User language, applicable only if LanguageSupport installed.
+ * @property string $admin_theme Admin theme class name
  * 
  * @method bool hasPagePermission($name, Page $page = null) #pw-internal
  * @method bool hasTemplatePermission($name, $template) #pw-internal
@@ -290,7 +291,7 @@ class User extends Page {
 	 * 
 	 * #pw-hooker
 	 *
-	 * @param string $name Permission name
+	 * @param string|Permission $name Permission name
 	 * @param Template|int|string $template Template object, name or ID
 	 * @return bool
 	 * @throws WireException
@@ -469,7 +470,7 @@ class User extends Page {
 	 *
 	 */
 	public function editUrl($options = array()) {
-		return str_replace('/page/edit/', '/access/users/edit/', parent::editUrl());
+		return str_replace('/page/edit/', '/access/users/edit/', parent::editUrl($options));
 	}
 
 	/**
@@ -497,6 +498,30 @@ class User extends Page {
 	 */
 	public function getPagesManager() {
 		return $this->wire('users');
+	}
+
+	/**
+	 * Does user have two-factor authentication (Tfa) enabled? (and what type?)
+	 *
+	 * - Returns boolean false if not enabled. 
+	 * - Returns string with Tfa module name (string) if enabled.
+	 * - When `$getInstance` argument is true, returns Tfa module instance rather than module name.
+	 * 
+	 * The benefit of using this method is that it can identify if Tfa is enabled without fully 
+	 * initializing a Tfa module that would attach hooks, etc. So when you only need to know if 
+	 * Tfa is enabled for a user, this method is more efficient than accessing `$user->tfa_type`. 
+	 * 
+	 * When using `$getInstance` to return module instance, note that the module instance might not 
+	 * be initialized (hooks not added, etc.). To retrieve an initialized instance, you can get it 
+	 * from `$user->tfa_type` rather than calling this method. 
+	 * 
+	 * @param bool $getInstance Get Tfa module instance when available? (default=false) 
+	 * @return bool|string|Tfa
+	 * @since 3.0.162
+	 * 
+	 */
+	public function hasTfa($getInstance = false) {
+		return Tfa::getUserTfaType($this, $getInstance); 
 	}
 
 	/**

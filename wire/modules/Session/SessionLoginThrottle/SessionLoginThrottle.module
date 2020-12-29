@@ -92,7 +92,7 @@ class SessionLoginThrottle extends WireData implements Module, ConfigurableModul
 			$allowed = false; 
 
 		} else if($this->checkIP) {
-			$ip = isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '';			
+			$ip = $this->wire('session')->getIP(); 
 			if(strlen($ip) && !$this->allowLogin($ip)) $allowed = false;
 		}
 
@@ -147,7 +147,7 @@ class SessionLoginThrottle extends WireData implements Module, ConfigurableModul
 					if($this->wire('process') == 'ProcessLogin') {
 						parent::error($error);
 					} else {
-						throw new WireException($error); // ensures the error can't be missed in unknown API usage
+						throw new SessionLoginThrottleException($error); // ensures the error can't be missed in unknown API usage
 					}
 				} else {
 					$allowed = true; 
@@ -268,3 +268,9 @@ class SessionLoginThrottle extends WireData implements Module, ConfigurableModul
 	}
 
 }
+
+/**
+ * Exception thrown when login overflow occurs and throttle is active
+ *
+ */
+class SessionLoginThrottleException extends WireException { }

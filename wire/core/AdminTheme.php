@@ -130,8 +130,10 @@ abstract class AdminTheme extends WireData implements Module {
 		$config = $this->wire('config');
 		/** @var Session $session */
 		$session = $this->wire('session');
+		/** @var User $user */
+		$user = $this->wire('user');
 		/** @var string $adminTheme */
-		$adminTheme = $this->wire('user')->admin_theme; 
+		$adminTheme = $user->admin_theme; 
 
 		if($adminTheme) {
 			// there is user specified admin theme
@@ -146,14 +148,14 @@ abstract class AdminTheme extends WireData implements Module {
 		// adjust $config adminThumbOptions[scale] for auto detect when requested
 		$o = $config->adminThumbOptions; 
 		if($o && isset($o['scale']) && $o['scale'] === 1) {
-			$o['scale'] = $session->hidpi ? 0.5 : 1.0; 
+			$o['scale'] = $session->get('hidpi') ? 0.5 : 1.0; 
 			$config->adminThumbOptions = $o;
 		}
 
 		$config->js('modals', $config->modals); 
-		
-		if($session->hidpi) $this->addBodyClass('hidpi-device');
-		if($session->touch) $this->addBodyClass('touch-device'); 
+
+		if($session->get('hidpi')) $this->addBodyClass('hidpi-device');
+		if($session->get('touch')) $this->addBodyClass('touch-device'); 
 		
 		$this->addBodyClass($this->className());
 	}
@@ -161,6 +163,25 @@ abstract class AdminTheme extends WireData implements Module {
 	public function get($key) {
 		if($key == 'version') return $this->version;
 		return parent::get($key); 
+	}
+
+	/**
+	 * Get predefined translated label by key for labels shared among admin themes
+	 * 
+	 * @param string $key
+	 * @param string $val Value to return if label not available
+	 * @return string
+	 * @since 3.0.162
+	 * 
+	 */
+	public function getLabel($key, $val = '') {
+		switch($key) {
+			case 'search-help': return $this->_('help'); // Localized term to type for search-engine help (3+ chars) 
+			case 'search-tip': return $this->_('Try “help”'); // // Search tip (indicating your translated “help” term)
+			case 'advanced-mode': return $this->_('Advanced Mode');
+			case 'debug': return $this->_('Debug'); 
+		}
+		return $val;
 	}
 
 	/**

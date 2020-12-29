@@ -12,7 +12,7 @@
  * and likewise a value set in $session won't appear in $_SESSION.  It's also good to use this class
  * over the $_SESSION superglobal just in case we ever need to replace PHP's session handling in the future.
  * 
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2019 by Ryan Cramer
  * https://processwire.com
  *
  * @see https://processwire.com/api/ref/session/ Session documentation
@@ -63,8 +63,23 @@ class Session extends Wire implements \IteratorAggregate {
 	 * Fingerprint bitmask: Use user agent (recommended)
 	 *
 	 */
-	const fingerprintUseragent = 8; 
+	const fingerprintUseragent = 8;
 	
+	/**
+	 * Fingerprint bitmask: Use “accept” content-types header
+	 *
+	 * @since 3.0.159
+	 *
+	 */
+	const fingerprintAccept = 16;
+
+	/**
+	 * Suffix applied to challenge cookies
+	 * 
+	 * @since 3.0.141
+	 * 
+	 */
+	const challengeSuffix = '_challenge';
 
 	/**
 	 * Reference to ProcessWire $config object
@@ -122,6 +137,7 @@ class Session extends Wire implements \IteratorAggregate {
 
 	/**
 	 * True if this is a secondary instance of ProcessWire
+	 * 
 	 * @var bool
 	 * 
 	 */
@@ -139,7 +155,7 @@ class Session extends Wire implements \IteratorAggregate {
 	public function __construct(ProcessWire $wire) {
 
 		$wire->wire($this);
-		$this->config = $this->wire('config'); 
+		$this->config = $wire->wire('config'); 
 		$this->sessionKey = $this->className();
 		
 		$instanceID = $wire->getProcessWireInstanceID();
@@ -179,15 +195,7 @@ class Session extends Wire implements \IteratorAggregate {
 		if(!$user || !$user->id) $user = $this->wire('users')->getGuestUser();
 		$this->wire('users')->setCurrentUser($user); 	
 
-		foreach(array('message', 'error', 'warning') as $type) {
-			$items = $this->get($type);
-			if(is_array($items)) foreach($items as $item) {
-				list($text, $flags) = $item;
-				parent::$type($text, $flags);
-			}
-			// $this->remove($type);
-		}
-	
+		if($sessionAllow) $this->wakeupNotices();
 		$this->setTrackChanges(true);
 	}
 
@@ -205,7 +213,7 @@ class Session extends Wire implements \IteratorAggregate {
 		} else {
 			$name = $this->config->sessionName;
 		}
-		if($checkLogin) $name .= "_challenge";
+		if($checkLogin) $name .= self::challengeSuffix;
 		return !empty($_COOKIE[$name]);
 	}
 
@@ -291,7 +299,8 @@ class Session extends Wire implements \IteratorAggregate {
 
 		// check challenge cookie
 		if($this->config->sessionChallenge) {
-			if(empty($_COOKIE[$sessionName . "_challenge"]) || ($this->get('_user', 'challenge') != $_COOKIE[$sessionName . "_challenge"])) {
+			$cookieName = $sessionName . self::challengeSuffix;
+			if(empty($_COOKIE[$cookieName]) || ($this->get('_user', 'challenge') != $_COOKIE[$cookieName])) {
 				$valid = false; 
 				$reason = "Error: Invalid challenge value";
 			}
@@ -345,23 +354,33 @@ class Session extends Wire implements \IteratorAggregate {
 	/**
 	 * Generate a session fingerprint
 	 *
-	 * If the `$mode` argument is omitted, the mode is pulled from `$config->sessionFingerprint`. If using the
-	 * mode argument, specify one of the following: 
+	 * If the `$mode` argument is omitted, the mode is pulled from `$config->sessionFingerprint`. 
+	 * If using the mode argument, specify one of the following:
 	 * 
-	 *  - 0 or false: Fingerprint nothing.
-	 *  - 1 or true: Fingerprint on with default/recommended setting (currently 10).
-	 *  - 2: Fingerprint only the remote IP.
-	 *  - 4: Fingerprint only the forwarded/client IP (can be spoofed).
-	 *  - 8: Fingerprint only the useragent.
-	 *  - 10: Fingerprint the remote IP and useragent (default).
-	 *  - 12: Fingerprint the forwarded/client IP and useragent.
-	 *  - 14: Fingerprint the remote IP, forwarded/client IP and useragent (all).
-	 * 
-	 * If using fingerprint in an environment where the user’s IP address may change during the session, you should
-	 * fingerprint only the useragent, or disable fingerprinting.
-	 * 
-	 * If using fingerprint with an AWS load balancer, you should use one of the options that uses the “client IP” 
-	 * rather than the “remote IP”, fingerprint only the useragent, or disable fingerprinting. 
+	 * - 2: Remote IP
+	 * - 4: Forwarded/client IP (can be spoofed)
+	 * - 8: Useragent
+	 * - 16: Accept header
+	 *
+	 * To use the custom `$mode` settings above, select one or more of those you want
+	 * to fingerprint, note the numbers, and determine the `$mode` like this:
+	 * ~~~~~~
+	 * // to fingerprint just remote IP
+	 * $mode = 2;
+	 *
+	 * // to fingerprint remote IP and useragent:
+	 * $mode = 2 | 8;
+	 *
+	 * // to fingerprint remote IP, useragent and accept header:
+	 * $mode = 2 | 8 | 16;
+	 * ~~~~~~
+	 * If using fingerprint in an environment where the user’s IP address may
+	 * change during the session, you should fingerprint only the useragent
+	 * and/or accept header, or disable fingerprinting.
+	 *
+	 * If using fingerprint with an AWS load balancer, you should use one of
+	 * the options that uses the “client IP” rather than the “remote IP”,
+	 * fingerprint only useragent and/or accept header, or disable fingerprinting.
 	 * 
 	 * #pw-internal
 	 * 
@@ -376,9 +395,9 @@ class Session extends Wire implements \IteratorAggregate {
 		$useFingerprint = $mode === null ? $this->config->sessionFingerprint : $mode;
 		
 		if(!$useFingerprint) return false;
-
-		if(is_bool($useFingerprint) || $useFingerprint == 1) {
-			// default (boolean true)
+		
+		if($useFingerprint === true || $useFingerprint === 1 || $useFingerprint === "1") {
+			// default (boolean true or int 1)
 			$useFingerprint = self::fingerprintRemoteAddr | self::fingerprintUseragent;
 			if($debug) $debugInfo[] = 'default';
 		}
@@ -398,6 +417,11 @@ class Session extends Wire implements \IteratorAggregate {
 		if($useFingerprint & self::fingerprintUseragent) {
 			$fingerprint .= isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
 			if($debug) $debugInfo[] = 'useragent';
+		}
+		
+		if($useFingerprint & self::fingerprintAccept) {
+			$fingerprint .= isset($_SERVER['HTTP_ACCEPT']) ? $_SERVER['HTTP_ACCEPT'] : '';
+			if($debug) $debugInfo[] = 'accept';
 		}
 		
 		if($debug) {
@@ -439,7 +463,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 *
 	 */
 	public function get($key, $_key = null) {
-		if($key == 'CSRF') {
+		if($key === 'CSRF') {
 			return $this->CSRF();
 		} else if(!is_null($_key)) {
 			// namespace
@@ -462,6 +486,24 @@ class Session extends Wire implements \IteratorAggregate {
 	}
 
 	/**
+	 * Get a session variable or return $val argument if session value not present
+	 * 
+	 * This is the same as get() except that it lets you specify a fallback return value in the method call. 
+	 * For a namespace version use `Session::getValFor()` instead. 
+	 * 
+	 * @param string $key Name of session variable to retrieve.
+	 * @param mixed $val Fallback value to return if session does not have it.
+	 * @return mixed Returns value of seession variable, or NULL if not found. 
+	 * @since 3.0.133
+	 * 
+	 */
+	public function getVal($key, $val = null) {
+		$value = $this->get($key);
+		if($value === null) $value = $val;
+		return $value;
+	}
+
+	/**
 	 * Get all session variables in an associative array
  	 *
 	 * @param object|string $ns Optional namespace
@@ -475,6 +517,18 @@ class Session extends Wire implements \IteratorAggregate {
 		} else {
 			return $this->data;
 		}
+	}
+
+	/**
+	 * Get all session variables for given namespace and return associative array
+	 * 
+	 * @param string|Wire $ns
+	 * @return array
+	 * @since 3.0.141 Method added for consistency, but any version can do this with $session->getFor($ns, '');
+	 * 
+	 */
+	public function getAllFor($ns) {
+		return $this->getFor($ns, '');
 	}
 
 	/**
@@ -537,6 +591,25 @@ class Session extends Wire implements \IteratorAggregate {
 		if(!is_array($data)) $data = array();
 		if($key === '') return $data;
 		return isset($data[$key]) ? $data[$key] : null;
+	}
+	
+	/**
+	 * Get a session variable or return $val argument if session value not present
+	 *
+	 * This is the same as get() except that it lets you specify a fallback return value in the method call.
+	 * For a namespace version use `Session::getValFor()` instead.
+	 *
+	 * @param string|object $ns Namespace string or object
+	 * @param string $key Specify variable name to retrieve
+	 * @param mixed $val Fallback value if session does not have one
+	 * @return mixed
+	 * @since 3.0.133
+	 *
+	 */
+	public function getValFor($ns, $key, $val = null) {
+		$value = $this->getFor($ns, $key);
+		if($value === null) $value = $val;
+		return $value;
 	}
 
 	/**
@@ -691,7 +764,7 @@ class Session extends Wire implements \IteratorAggregate {
 	}
 
 	/**
-	 * Get the IP address of the current user
+	 * Get the IP address of the current user (IPv4)
 	 * 
 	 * ~~~~~
 	 * $ip = $session->getIP();
@@ -705,8 +778,14 @@ class Session extends Wire implements \IteratorAggregate {
 	 *
 	 */
 	public function getIP($int = false, $useClient = false) {
+		
+		$ip = $this->config->sessionForceIP;
+		
+		if(!empty($ip)) {
+			// use IP address specified in $config->sessionForceIP and disregard other options
+			$useClient = false;
 
-		if(empty($_SERVER['REMOTE_ADDR'])) {
+		} else if(empty($_SERVER['REMOTE_ADDR'])) {
 			// when accessing via CLI Interface, $_SERVER['REMOTE_ADDR'] isn't set and trying to get it, throws a php-notice
 			$ip = '127.0.0.1';
 			
@@ -821,12 +900,12 @@ class Session extends Wire implements \IteratorAggregate {
 
 			if($this->config->sessionChallenge) {
 				// create new challenge
-				$pass = $this->wire(new Password());
-				$challenge = $pass->randomBase64String(32);
+				$rand = new WireRandom();
+				$challenge = $rand->base64(32);
 				$this->set('_user', 'challenge', $challenge); 
 				$secure = $this->config->sessionCookieSecure ? (bool) $this->config->https : false;
 				// set challenge cookie to last 30 days (should be longer than any session would feasibly last)
-				setcookie(session_name() . '_challenge', $challenge, time()+60*60*24*30, '/', 
+				setcookie(session_name() . self::challengeSuffix, $challenge, time()+60*60*24*30, '/', 
 					$this->config->sessionCookieDomain, $secure, true); 
 			}
 
@@ -1019,9 +1098,30 @@ class Session extends Wire implements \IteratorAggregate {
 		if(isset($_COOKIE[$sessionName])) {
 			setcookie($sessionName, '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
 		}
-		if(isset($_COOKIE[$sessionName . "_challenge"])) {
-			setcookie($sessionName . "_challenge", '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
+		if(isset($_COOKIE[$sessionName . self::challengeSuffix])) {
+			setcookie($sessionName . self::challengeSuffix, '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
 		}
+	}
+
+	/**
+	 * Get the names of all cookies managed by Session
+	 * 
+	 * #pw-internal
+	 * 
+	 * @return array
+	 * @since 3.0.141
+	 * 
+	 */
+	public function getCookieNames() {
+		$name = $this->config->sessionName;
+		$nameSecure = $this->config->sessionNameSecure;
+		if(empty($nameSecure)) $nameSecure = $this->config->sessionName . 's';
+		$a = array($name, $nameSecure); 
+		if($this->config->sessionChallenge) {
+			$a[] = $name . self::challengeSuffix;
+			$a[] = $nameSecure . self::challengeSuffix;
+		}
+		return $a;
 	}
 
 	/**
@@ -1055,15 +1155,10 @@ class Session extends Wire implements \IteratorAggregate {
 		// if there are notices, then queue them so that they aren't lost
 		if($this->sessionInit) {
 			$notices = $this->wire('notices');
-			if(count($notices)) foreach($notices as $notice) {
-				if($notice instanceof NoticeWarning) {
-					$noticeType = 'warning';
-				} else if($notice instanceof NoticeError) {
-					$noticeType = 'error';
-				} else {
-					$noticeType = 'message';
+			if(count($notices)) {
+				foreach($notices as $notice) {
+					$this->queueNotice($notice);
 				}
-				$this->queueNotice($notice->text, $noticeType, $notice->flags);
 			}
 		}
 
@@ -1079,7 +1174,8 @@ class Session extends Wire implements \IteratorAggregate {
 				if(!strpos($url, 'modal=')) $url .= (strpos($url, '?') !== false ? '&' : '?') . 'modal=1'; 
 			}
 		}
-		$this->wire()->setStatus(ProcessWire::statusFinished);
+		$statusData = array('redirectUrl' => $url, 'redirectType' => ($http301 ? 301 : 302)); 
+		$this->wire()->setStatus(ProcessWire::statusFinished, $statusData);
 		if($http301) header("HTTP/1.1 301 Moved Permanently");
 		header("Location: $url");
 		exit(0);
@@ -1096,22 +1192,71 @@ class Session extends Wire implements \IteratorAggregate {
 	}
 
 	/**
-	 * Queue a notice (message/error) to be shown the next time this session class is instantiated
+	 * Queue notice text to be shown the next time this session class is instantiated
 	 * 
 	 * #pw-internal
 	 * 
 	 * @param string $text
-	 * @param string $type One of "message", "error" or "warning"
+	 * @param string $type One of "messages", "errors" or "warnings"
 	 * @param int $flags
 	 * 
 	 */
-	protected function queueNotice($text, $type, $flags) {
+	protected function queueNoticeText($text, $type, $flags) {
 		if(!$this->sessionInit) return;
-		$items = $this->get($type);
+		$items = $this->getFor('_notices', $type);
 		if(is_null($items)) $items = array();
-		$item = array($text, $flags); 
+		$item = array('text' => $text, 'flags' => $flags); 
 		$items[] = $item;
-		$this->set($type, $items); 
+		$this->setFor('_notices', $type, $items); 
+	}
+
+	/**
+	 * Queue a Notice object to be shown the next time this session class is instantiated
+	 *
+	 * #pw-internal
+	 *
+	 * @param Notice $notice
+	 *
+	 */
+	protected function queueNotice(Notice $notice) {
+		if(!$this->sessionInit) return;
+		$type = $notice->getName();
+		$items = $this->getFor('_notices', $type);
+		if(is_null($items)) $items = array();
+		$items[] = $notice->getArray();
+		$this->setFor('_notices', $type, $items); 
+	}
+
+	/**
+	 * Pull queued notices and convert them to notices for this request
+	 * 
+	 * #pw-internal
+	 * 
+	 */
+	protected function wakeupNotices() {
+
+		/** @var Notices $notices */
+		$notices = $this->wire('notices');
+		if(!$notices) return;
+		
+		$types = array(
+			'messages' => 'NoticeMessage',
+			'errors' => 'NoticeError',
+			'warnings' => 'NoticeWarning',
+		);
+		
+		foreach($types as $type => $className) {
+			$items = $this->getFor('_notices', $type);
+			if(!is_array($items)) continue;
+			
+			foreach($items as $item) {
+				if(!isset($item['text'])) continue;
+				$class = wireClassName($className, true);
+				$notice = $this->wire(new $class(''));
+				$notice->setArray($item);
+				$notices->add($notice);
+			}
+		}
 	}
 
 
@@ -1126,7 +1271,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 *
 	 */
 	public function message($text, $flags = 0) {
-		$this->queueNotice($text, 'message', $flags); 
+		$this->queueNoticeText($text, 'messages', $flags); 
 		return $this;
 	}
 
@@ -1141,7 +1286,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 * 
 	 */
 	public function error($text, $flags = 0) {
-		$this->queueNotice($text, 'error', $flags); 
+		$this->queueNoticeText($text, 'errors', $flags); 
 		return $this; 
 	}
 
@@ -1156,7 +1301,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 *
 	 */
 	public function warning($text, $flags = 0) {
-		$this->queueNotice($text, 'warning', $flags);
+		$this->queueNoticeText($text, 'warnings', $flags);
 		return $this;
 	}
 
@@ -1259,9 +1404,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 * 
 	 */
 	public function removeNotices() {
-		foreach(array('message', 'error', 'warning') as $type) {
-			$this->remove($type);
-		}
+		$this->removeAllFor('_notices');
 	}
 
 	/**

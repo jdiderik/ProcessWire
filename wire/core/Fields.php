@@ -8,7 +8,16 @@
  * ProcessWire 3.x, Copyright 2018 by Ryan Cramer
  * https://processwire.com
  * 
- * #pw-summary Manages all custom fields in ProcessWire
+ * #pw-summary Manages all custom fields in ProcessWire, independently of any Fieldgroup. 
+ * #pw-var $fields
+ * #pw-body = 
+ * Each field returned is an object of type `Field`. The $fields API variable is iterable: 
+ * ~~~~~
+ * foreach($fields as $field) {
+ *   echo "<p>Name: $field->name, Type: $field->type, Label: $field->label</p>";
+ * }
+ * ~~~~~
+ * #pw-body
  * 
  * @method Field|null get($key) Get a field by name or id
  * @method bool changeFieldtype(Field $field1, $keepSettings = false)
@@ -86,6 +95,8 @@ class Fields extends WireSaveableItems {
 		'_custom',
 	);
 
+	protected $flagNames = array();
+
 	/**
 	 * Field names that are native/permanent to this instance of ProcessWire (configurable at runtime)
 	 * 
@@ -103,11 +114,28 @@ class Fields extends WireSaveableItems {
 	protected $tagList = null;
 
 	/**
+	 * @var FieldsTableTools|null
+	 * 
+	 */
+	protected $tableTools = null;
+
+	/**
 	 * Construct
 	 *
 	 */
 	public function __construct() {
 		$this->fieldsArray = new FieldsArray();
+		$this->flagNames = array(
+			Field::flagAutojoin => 'autojoin',
+			Field::flagGlobal => 'global',
+			Field::flagSystem => 'system',
+			Field::flagPermanent => 'permanent',
+			Field::flagAccess => 'access',
+			Field::flagAccessAPI => 'access-api',
+			Field::flagAccessEditor => 'access-editor',
+			Field::flagFieldgroupContext => 'fieldgroup-context',
+			Field::flagSystemOverride => 'system-override',
+		);
 		// convert so that keys are names so that isset() can be used rather than in_array()
 		if(isset(self::$nativeNamesSystem[0])) self::$nativeNamesSystem = array_flip(self::$nativeNamesSystem);
 	}
@@ -131,6 +159,46 @@ class Fields extends WireSaveableItems {
 	 */
 	public function makeBlankItem() {
 		return $this->wire(new Field());
+	}
+
+	/**
+	 * Make an item and populate with given data
+	 *
+	 * @param array $a Associative array of data to populate
+	 * @return Saveable|Wire
+	 * @throws WireException
+	 * @since 3.0.146
+	 *
+	 */
+	public function makeItem(array $a = array()) {
+		
+		if(empty($a['type'])) return parent::makeItem($a);
+		
+		/** @var Fieldtypes $fieldtypes */
+		$fieldtypes = $this->wire('fieldtypes');
+		if(!$fieldtypes) return parent::makeItem($a);
+		
+		/** @var Fieldtype $fieldtype */
+		$fieldtype = $fieldtypes->get($a['type']);
+		if(!$fieldtype) return parent::makeItem($a);
+		
+		$class = $fieldtype->getFieldClass($a);
+		if(empty($class) || $class === 'Field') return parent::makeItem($a);
+		
+		if(strpos($class, "\\") === false) $class = wireClassName($class, true);
+		if(!class_exists($class)) return parent::makeItem($a);
+	
+		/** @var Field $field */
+		$field = new $class();
+		$this->wire($field);
+		
+		foreach($a as $key => $value) {
+			$field->$key = $value;
+		}
+		
+		$field->resetTrackChanges(true);
+		
+		return $field;
 	}
 
 	/**
@@ -198,8 +266,12 @@ class Fields extends WireSaveableItems {
 				$database->exec("RENAME TABLE `$prevTable` TO `tmp_$table`"); // QA
 				$database->exec("RENAME TABLE `tmp_$table` TO `$table`"); // QA
 			}
-			$item->type->renamedField($item, str_replace(Field::tablePrefix, '', $prevTable));
 			$item->prevTable = '';
+		}
+		
+		if(!$isNew && $item->prevName && $item->prevName != $item->name) {
+			$item->type->renamedField($item, $item->prevName);
+			$item->prevName = '';
 		}
 
 		if($item->prevFieldtype && $item->prevFieldtype->name != $item->type->name) {
@@ -309,7 +381,6 @@ class Fields extends WireSaveableItems {
 	 * @param Field|Saveable $item Field to clone
 	 * @param string $name Optionally specify name for new cloned item
 	 * @return bool|Saveable $item Returns the new clone on success, or false on failure
-	 * @throws WireException
 	 *
 	 */
 	public function ___clone(Saveable $item, $name = '') {
@@ -357,7 +428,7 @@ class Fields extends WireSaveableItems {
 
 		$field_id = (int) $field->id;
 		$fieldgroup_id = (int) $fieldgroup->id; 
-		$database = $this->wire('database');
+		$database = $this->wire()->database;
 
 		$newValues = $field->getArray();
 		$oldValues = $fieldOriginal->getArray();
@@ -435,13 +506,12 @@ class Fields extends WireSaveableItems {
 		// if there is something in data, then JSON encode it. If it's empty then make it null.
 		$data = count($data) ? wireEncodeJSON($data, true) : null;
 
-		if(is_null($data)) {
-			$data = 'NULL';
+		$query = $database->prepare('UPDATE fieldgroups_fields SET data=:data WHERE fields_id=:field_id AND fieldgroups_id=:fieldgroup_id');
+		if(empty($data)) {
+			$query->bindValue(':data', null, \PDO::PARAM_NULL); 
 		} else {
-			$data = "'" . $this->wire('database')->escapeStr($data) . "'";
+			$query->bindValue(':data', $data, \PDO::PARAM_STR); 
 		}
-		
-		$query = $database->prepare("UPDATE fieldgroups_fields SET data=$data WHERE fields_id=:field_id AND fieldgroups_id=:fieldgroup_id"); // QA
 		$query->bindValue(':field_id', $field_id, \PDO::PARAM_INT);
 		$query->bindValue(':fieldgroup_id', $fieldgroup_id, \PDO::PARAM_INT); 
 		$result = $query->execute();
@@ -915,7 +985,32 @@ class Fields extends WireSaveableItems {
 	}
 
 	/**
+	 * Get all flag names or get all flag names for given flags or Field
+	 * 
+	 * #pw-internal
+	 * 
+	 * @param int|Field|null $flags Specify flags or Field or omit to get all flag names
+	 * @param bool $getString Get a string of flag names rather than array? (default=false)
+	 * @return array|string When array is returned, array is of strings indexed by flag value (int)
+	 * 
+	 */
+	public function getFlagNames($flags = null, $getString = false) {
+		if($flags === null) {
+			$a = $this->flagNames;
+		} else {
+			$a = array();
+			if($flags instanceof Field) $flags = $flags->flags;
+			foreach($this->flagNames as $flag => $name) {
+				if($flags & $flag) $a[$flag] = $name;
+			}
+		}
+		return $getString ? implode(' ', $a) : $a;	
+	}
+
+	/**
 	 * Overridden from WireSaveableItems to retain keys with 0 values and remove defaults we don't need saved
+	 * 
+	 * #pw-internal
 	 * 
 	 * @param array $value
 	 * @return string of JSON
@@ -1000,6 +1095,47 @@ class Fields extends WireSaveableItems {
 	 * 
 	 */
 	public function ___changeTypeReady(Saveable $item, Fieldtype $fromType, Fieldtype $toType) { }
+
+	/**
+	 * Get Fieldtypes compatible (for type change) with given Field
+	 * 
+	 * #pw-internal
+	 *
+	 * @param Field $field
+	 * @return array Array of Fieldtype objects indexed by class name
+	 * @since 3.0.140
+	 *
+	 */
+	public function getCompatibleFieldtypes(Field $field) {
+		$fieldtype = $field->type;
+		if($fieldtype) {
+			// ask fieldtype what is compatible
+			$fieldtypes = $fieldtype->getCompatibleFieldtypes($field);
+			if(!$fieldtypes || !$fieldtypes instanceof WireArray) {
+				$fieldtypes = $this->wire(new Fieldtypes());
+			}
+			// ensure original is present
+			$fieldtypes->prepend($fieldtype);
+		} else {
+			// allow all
+			$fieldtypes = $this->wire('fieldtypes');
+		}
+		return $fieldtypes;
+	}
+
+	/**
+	 * Get FieldsIndexTools instance
+	 * 
+	 * #pw-internal
+	 * 
+	 * @return FieldsTableTools
+	 * @since 3.0.150
+	 * 
+	 */
+	public function tableTools() {
+		if($this->tableTools === null) $this->tableTools = $this->wire(new FieldsTableTools());
+		return $this->tableTools;
+	}
 
 }
 

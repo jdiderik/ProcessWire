@@ -140,11 +140,12 @@
  * 
  * ~~~~~
  * {
- *   title: 'Your Module title',
- *   version: 1,
- *   // and so on
+ *   "title": "Your Module Title",
+ *   "version": 1
  * }
  * ~~~~~
+ * Note: The example JSON above just shows "title" and "version", but you would
+ * likely add more than that as needed, like shown in the static version above. 
  * 
  * -----------------------------------------------------------------
  *
@@ -331,7 +332,7 @@
  * to support the module from one version to another. The previous known version ($fromVersion) and new
  * version ($toVersion) are provided as arguments.
  * 
- * If implemented, uninstall() methods typically are defined hookable as `public function ___upgrade(...)`. 
+ * If implemented, upgrade() methods typically are defined hookable as `public function ___upgrade(...)`. 
  * If the upgrade cannot proceed for some reason, this method should throw a `WireException`. 
  * 
  * 
@@ -527,7 +528,7 @@ interface SearchableModule {
 	/**
 	 * Search for items containing $text and return an array representation of them
 	 * 
-	 * You may implement also implement this method as hookable, i.e. ___search(), but not that you’ll
+	 * You may also implement this method as hookable, i.e. ___search(), but note that you’ll
 	 * want to skip the "implements SearchableModule" in your class definition. 
 	 *
 	 * Must return PHP array in the format below. For each item in the 'items' array, Only the 'title' 

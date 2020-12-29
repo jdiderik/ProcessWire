@@ -10,7 +10,7 @@
  * in order to save resources. As a result, anything iterating through these Modules should check to make sure it's not a ModulePlaceholder
  * before using it. If it's a ModulePlaceholder, then the real Module can be instantiated/retrieved by $modules->get($className).
  * 
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2019 by Ryan Cramer
  * https://processwire.com
  * 
  * #pw-summary Loads and manages all modules in ProcessWire. 
@@ -310,8 +310,13 @@ class Modules extends WireArray {
 	 *
 	 */
 	public function __construct($path) {
+		parent::__construct();
 		$this->addPath($path); 
+	}
+	
+	public function wired() {
 		$this->coreModulesDir = '/' . $this->wire('config')->urls->data('modules');
+		parent::wired();
 	}
 
 	/**
@@ -1139,7 +1144,7 @@ class Modules extends WireArray {
 				$prependFiles = array();
 			}
 			if($cache && $cacheName) {
-				$cache->save($cacheName, implode("\n", $files), WireCache::expireNever);
+				$cache->save($cacheName, implode("\n", $files), WireCache::expireReserved);
 			}
 		}
 
@@ -1516,6 +1521,7 @@ class Modules extends WireArray {
 	 * 
 	 * @param string $file
 	 * @param string $moduleName
+	 * @return bool
 	 * 
 	 */
 	protected function includeModuleFile($file, $moduleName) {
@@ -1527,11 +1533,11 @@ class Modules extends WireArray {
 		if($wire1 !== $wire2) {
 			// multi-instance is active, don't autoload module if class already exists
 			// first do a fast check, which should catch any core modules 
-			if(class_exists(__NAMESPACE__ . "\\$moduleName", false)) return;
+			if(class_exists(__NAMESPACE__ . "\\$moduleName", false)) return true;
 			// next do a slower check, figuring out namespace
 			$ns = $this->getModuleNamespace($moduleName, array('file' => $file));
 			$className = trim($ns, "\\") . "\\$moduleName";
-			if(class_exists($className, false)) return;
+			if(class_exists($className, false)) return true;
 			// if this point is reached, module is not yet in memory in either instance
 			// temporarily set the $wire instance to 2nd instance during include()
 			ProcessWire::setCurrentInstance($wire2);
@@ -1542,11 +1548,15 @@ class Modules extends WireArray {
 
 		if($file) {
 			/** @noinspection PhpIncludeInspection */
-			include_once($file);
+			$success = @include_once($file);
+		} else {
+			$success = false;
 		}
 	
 		// set instance back, if multi-instance
 		if($wire1 !== $wire2) ProcessWire::setCurrentInstance($wire1);
+		
+		return (bool) $success;
 	}
 
 	/**
@@ -1574,7 +1584,8 @@ class Modules extends WireArray {
 	 * 
 	 * By default this method returns module class names matching the given prefix. 
 	 * To instead retrieve instantiated (ready-to-use) modules, specify boolean true
-	 * for the second argument. 
+	 * for the second argument. Regardless of `$load` argument all returned arrays
+	 * are indexed by module name.
 	 * 
 	 * ~~~~~
 	 * // Retrieve array of all Textformatter module names
@@ -1585,27 +1596,31 @@ class Modules extends WireArray {
 	 * ~~~~~
 	 * 
 	 * @param string $prefix Specify prefix, i.e. "Process", "Fieldtype", "Inputfield", etc.
-	 * @param bool|int $load Specify one of the following:
+	 * @param bool|int $load Specify one of the following (all indexed by module name):
 	 *  - Boolean true to return array of instantiated modules.
 	 *  - Boolean false to return array of module names (default).
 	 *  - Integer 1 to return array of module info for each matching module.
 	 *  - Integer 2 to return array of verbose module info for each matching module. 
+	 *  - Integer 3 to return array of Module or ModulePlaceholder objects (whatever current state is). Added 3.0.146.
 	 * @return array Returns array of module class names or Module objects. In either case, array indexes are class names.
 	 * 
 	 */
 	public function findByPrefix($prefix, $load = false) {
 		$results = array();
-		foreach($this as $key => $value) {
-			$className = wireClassName($value->className(), false);
-			if(strpos($className, $prefix) !== 0) continue;
-			if($load === 1) {
-				$results[$className] = $this->getModuleInfo($className); 
-			} else if($load === 2) {
-				$results[$className] = $this->getModuleInfoVerbose($className); 
+		foreach($this as $moduleName => $value) {
+			if(stripos($moduleName, $prefix) !== 0) continue;
+			if($load === false) {
+				$results[$moduleName] = $moduleName;
 			} else if($load === true) {
-				$results[$className] = $this->getModule($className);
+				$results[$moduleName] = $this->getModule($moduleName);
+			} else if($load === 1) {
+				$results[$moduleName] = $this->getModuleInfo($moduleName); 
+			} else if($load === 2) {
+				$results[$moduleName] = $this->getModuleInfoVerbose($moduleName);
+			} else if($load === 3) {
+				$results[$moduleName] = $value;
 			} else {
-				$results[$className] = $className;
+				$results[$moduleName] = $moduleName;
 			}
 		}
 		return $results;
@@ -1888,7 +1903,7 @@ class Modules extends WireArray {
 		$this->add($module); 
 		unset($this->installable[$class]);
 		
-		// note: the module's install is called here because it may need to know it's module ID for installation of permissions, etc. 
+		// note: the module's install is called here because it may need to know its module ID for installation of permissions, etc. 
 		if(method_exists($module, '___install') || method_exists($module, 'install')) {
 			try {
 				/** @var _Module $module */
@@ -2072,6 +2087,9 @@ class Modules extends WireArray {
 
 		$filename = $this->installable[$class];
 		$basename = basename($filename); 
+		
+		/** @var WireFileTools $fileTools */
+		$fileTools = $this->wire('files'); 
 
 		// double check that $class is consistent with the actual $basename	
 		if($basename === "$class.module" || $basename === "$class.module.php") {
@@ -2128,7 +2146,7 @@ class Modules extends WireArray {
 						continue; 
 					}
 					if($file->isDir()) {
-						$dirs[] = $file->getPathname();
+						$dirs[] = $fileTools->unixDirName($file->getPathname());
 						continue; 
 					}
 					if(in_array($file->getBasename(), $files)) continue; // skip known files
@@ -2690,9 +2708,8 @@ class Modules extends WireArray {
 	 *  - `minify` (bool): Remove non-applicable and properties that match defaults? (default=false, or true when getting `all`)
 	 *  - `noCache` (bool): prevents use of cache to retrieve the module info. (default=false)
 	 * @return array Associative array of module information
-	 * @throws WireException when a module exists but has no means of returning module info
 	 * @see Modules::getModuleInfoVerbose()
-	 * @todo move all getModuleInfo methods to their own ModuleInfo class and break this method down further. 
+	 * @todo move all getModuleInfo methods to their own ModuleInfo class and break this method down further.
 	 *	
 	 */
 	public function getModuleInfo($class, array $options = array()) {
@@ -3014,7 +3031,6 @@ class Modules extends WireArray {
 	 *  - `noCache` (bool): prevents use of cache to retrieve the module info
 	 *  - `noInclude` (bool): prevents include() of the module file, applicable only if it hasn't already been included
 	 * @return array Associative array of module information
-	 * @throws WireException when a module exists but has no means of returning module info
 	 * @see Modules::getModuleInfo()
 	 *
 	 */
@@ -3031,10 +3047,11 @@ class Modules extends WireArray {
 	 * @param string $property Name of property to get
 	 * @param array $options Additional options (see getModuleInfo method for options)
 	 * @return mixed|null Returns value of property or null if not found
+	 * @since 3.0.107
 	 * 
 	 */
 	public function getModuleInfoProperty($class, $property, array $options = array()) {
-		if(isset($this->moduleInfoVerboseKeys[$property])) {
+		if(in_array($property, $this->moduleInfoVerboseKeys)) {
 			$info = $this->getModuleInfoVerbose($class, $options);
 			$info['verbose'] = true;
 		} else {
@@ -3251,6 +3268,9 @@ class Modules extends WireArray {
 	 * $data = $modules->getConfig('HelloWorld');
 	 * $data['greeting'] = 'Hello World! How are you today?';
 	 * $modules->saveConfig('HelloWorld', $data);
+	 * 
+	 * // Getting just one property 'apiKey' from module config data
+	 * @apiKey = $modules->getConfig('HelloWorld', 'apiKey'); 
 	 * ~~~~~~
 	 *
 	 * #pw-group-configuration
@@ -3258,8 +3278,8 @@ class Modules extends WireArray {
 	 * 
 	 * @param string|Module $class
 	 * @param string $property Optionally just get value for a specific property (omit to get all config)
-	 * @return array Module configuration data
-	 * @see Modules::saveConfig()
+	 * @return array|string|int|float Module configuration data, returns array unless a specific $property was requested
+	 * @see Modules::saveConfig() 
 	 * @since 3.0.16 Use method getModuleConfigData() with same arguments for prior versions (can also be used on any version).
 	 *
 	 */
@@ -3268,7 +3288,9 @@ class Modules extends WireArray {
 		$emptyReturn = $property ? null : array();
 		$className = $class;
 		if(is_object($className)) $className = wireClassName($className->className(), false);
-		if(!$id = $this->moduleIDs[$className]) return $emptyReturn;
+		if(!isset($this->moduleIDs[$className])) return $emptyReturn;
+		$id = $this->moduleIDs[$className];
+		if(!$id) return $emptyReturn;
 		if(!isset($this->configData[$id])) return $emptyReturn; // module has no config data
 		
 		if(is_array($this->configData[$id])) {
@@ -3293,14 +3315,6 @@ class Modules extends WireArray {
 		return $data; 	
 	}
 	
-	/**
-	 * Alias of getConfig() for backwards compatibility
-	 *
-	 * @param string|Module $className
-	 * @return array
-	 *
-	 */
-
 	/**
 	 * Get the path + filename (or optionally URL) for this module
 	 * 
@@ -3507,7 +3521,11 @@ class Modules extends WireArray {
 				if($moduleInstance && $moduleInstance instanceof ConfigurableModule) {
 					// re-try because moduleInfo may be temporarily incorrect for this request because of change in moduleInfo format
 					// this is due to reports of ProcessChangelogHooks not getting config data temporarily between 2.6.11 => 2.6.12
-					$this->error("Configurable module check failed for $className, retrying...", Notice::debug);
+					$this->error(
+						"Configurable module check failed for $className. " . 
+						"If this error persists, please do a Modules > Refresh.", 
+						Notice::debug
+					);
 					$useCache = false; 
 				} else {
 					return false;
@@ -4127,7 +4145,7 @@ class Modules extends WireArray {
 	}
 
 	/**
-	 * Is the given namespace a unique recognized module namespace? If yes, returns the path to it. If not, returns boolean false;
+	 * Is the given namespace a unique recognized module namespace? If yes, returns the path to it. If not, returns boolean false.
 	 * 
 	 * #pw-internal
 	 * 
@@ -4607,7 +4625,7 @@ class Modules extends WireArray {
 			if(!in_array($id, $this->moduleIDs)) unset($this->modulesLastVersions[$id]);
 		}
 		if(count($this->modulesLastVersions)) {
-			$this->wire('cache')->save(self::moduleLastVersionsCacheName, $this->modulesLastVersions, WireCache::expireNever);
+			$this->wire('cache')->save(self::moduleLastVersionsCacheName, $this->modulesLastVersions, WireCache::expireReserved);
 		} else {
 			$this->wire('cache')->delete(self::moduleLastVersionsCacheName);
 		}
@@ -4851,7 +4869,7 @@ class Modules extends WireArray {
 					}
 				}
 			}
-			$this->wire('cache')->save($cacheName, $data, WireCache::expireNever); 
+			$this->wire('cache')->save($cacheName, $data, WireCache::expireReserved); 
 		}
 	
 		$this->log('Saved module info caches'); 
@@ -5044,11 +5062,14 @@ class Modules extends WireArray {
 	 */
 	public function compile($moduleName, $file = '', $namespace = null) {
 		
+		static $allowCompile = null;
+		if($allowCompile === null) $allowCompile = $this->wire('config')->moduleCompile;
+		
 		// if not given a file, track it down
 		if(empty($file)) $file = $this->getModuleFile($moduleName);
 
 		// don't compile when module compilation is disabled
-		if(!$this->wire('config')->moduleCompile) return $file;
+		if(!$allowCompile) return $file;
 	
 		// don't compile core modules
 		if(strpos($file, $this->coreModulesDir) !== false) return $file;
@@ -5074,7 +5095,8 @@ class Modules extends WireArray {
 	
 		// compile if necessary
 		if($compile) {
-			$compiler = new FileCompiler(dirname($file));
+			/** @var FileCompiler $compiler */
+			$compiler = $this->wire(new FileCompiler(dirname($file)));
 			$compiledFile = $compiler->compile(basename($file));
 			if($compiledFile) $file = $compiledFile;
 		}

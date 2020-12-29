@@ -83,6 +83,14 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	protected $duplicateChecking = true;
 
 	/**
+	 * Flags for PHP sort functions
+	 * 
+	 * @var int
+	 * 
+	 */
+	protected $sortFlags = 0; // 0 == SORT_REGULAR
+
+	/**
 	 * Construct
 	 * 
 	 */
@@ -817,6 +825,7 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	 */
 	public function getRandom($num = 1, $alwaysArray = false) {
 		$items = $this->makeNew(); 
+		if($num < 1) return $items;
 		$count = $this->count();
 		if(!$count) {
 			if($num == 1 && !$alwaysArray) return null;
@@ -1257,10 +1266,15 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	 * #pw-group-manipulation
 	 * 
 	 * @param string|array $properties Field names to sort by (CSV string or array). 
+	 * @param int|null $flags Optionally specify sort flags (see sortFlags method for details). 
 	 * @return $this reference to current instance.
 	 */
-	public function sort($properties) {
-		return $this->_sort($properties);
+	public function sort($properties, $flags = null) {
+		$_flags = $this->sortFlags; // remember
+		if(is_int($flags)) $this->sortFlags($flags);
+		$result = $this->_sort($properties);
+		if(is_int($flags) && $flags !== $_flags) $this->sortFlags($_flags); // restore
+		return $result;
 	}
 
 	/**
@@ -1292,6 +1306,32 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 		$this->data = $data; 
 
 		return $this;
+	}
+
+	/**
+	 * Get or set sort flags that affect behavior of any sorting functions
+	 * 
+	 * The following constants may be used when setting the sort flags:
+	 * 
+	 * - `SORT_REGULAR` compare items normally (don’t change types)
+	 * - `SORT_NUMERIC` compare items numerically
+	 * - `SORT_STRING` compare items as strings
+	 * - `SORT_LOCALE_STRING` compare items as strings, based on the current locale
+	 * - `SORT_NATURAL` compare items as strings using “natural ordering” like natsort()
+	 * - `SORT_FLAG_CASE` can be combined (bitwise OR) with SORT_STRING or SORT_NATURAL to sort strings case-insensitively
+	 *
+	 * For more details, see `$sort_flags` argument at: https://www.php.net/manual/en/function.sort.php
+	 * 
+	 * #pw-group-manipulation
+	 * 
+	 * @param bool $sortFlags Optionally specify flag(s) to set
+	 * @return int Returns current flags
+	 * @since 3.0.129
+	 * 
+	 */
+	public function sortFlags($sortFlags = false) {
+		if(is_int($sortFlags)) $this->sortFlags = $sortFlags;
+		return $this->sortFlags;
 	}
 
 	/**
@@ -1355,8 +1395,8 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 		}
 
 		// sort the items by the keys we collected
-		if($reverse) krsort($sortable);
-			else ksort($sortable); 
+		if($reverse) krsort($sortable, $this->sortFlags);
+			else ksort($sortable, $this->sortFlags); 
 
 		// add the items that resolved to no key to the end, as an array
 		$sortable[] = $unidentified; 
@@ -1410,7 +1450,7 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	 * This function contains additions and modifications by @niklaka.
 	 *
 	 * @param string|array|Selectors $selectors Selector string|array to use as the filter.
-	 * @param bool $not Make this a "not" filter? (default is false)
+	 * @param bool|int $not Make this a "not" filter? Use int 1 for “not all” mode as if selectors had brackets around it. (default is false)
 	 * @return $this reference to current [filtered] instance
 	 *
 	 */
@@ -1431,6 +1471,8 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 		$start = 0;
 		$limit = null;
 		$eq = null;
+		$notAll = $not === 1;
+		if($notAll) $not = true;
 
 		// leave sort, limit and start away from filtering selectors
 		foreach($selectors as $selector) {
@@ -1467,7 +1509,10 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 		
 		// now filter the data according to the selectors that remain
 		foreach($this->data as $key => $item) {
+			$qty = 0;
+			$qtyMatch = 0;	
 			foreach($selectors as $selector) {
+				$qty++;
 				if(is_array($selector->field)) {
 					$value = array();
 					foreach($selector->field as $field) $value[] = (string) $this->getItemPropertyValue($item, $field);
@@ -1475,9 +1520,15 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 					$value = (string) $this->getItemPropertyValue($item, $selector->field);
 				}
 				if($not === $selector->matches($value) && isset($this->data[$key])) {
+					$qtyMatch++;
+					if($notAll) continue; // will do this outside the loop of all in $selectors match
 					$this->trackRemove($this->data[$key], $key);
 					unset($this->data[$key]);
 				}
+			}
+			if($notAll && $qty && $qty === $qtyMatch) {
+				$this->trackRemove($this->data[$key], $key);
+				unset($this->data[$key]);
 			}
 		}
 
@@ -1571,6 +1622,20 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	public function not($selector) {
 		// Same as filterData, but for public interface with the $not option specifically set to "true".
 		return $this->filterData($selector, true); 
+	}
+
+	/**
+	 * Like the not() method but $selector evaluated as if it had (brackets) around it 
+	 *
+	 * #pw-internal Until we've got a better description for what this does
+	 *
+	 * @param string|array|Selectors $selector
+	 * @return $this reference to current instance.
+	 * @see filterData
+	 *
+	 */
+	public function notAll($selector) {
+		return $this->filterData($selector, 1); 
 	}
 
 	/**
@@ -1828,6 +1893,8 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	protected function trackAdd($item, $key) {
 		if($key) {}
 		if($this->trackChanges()) $this->itemsAdded[] = $item;
+		// wire this WireArray to the same instance of $item, if it isn’t already wired
+		if($this->_wire === null && $item instanceof Wire && $item->isWired()) $item->wire($this);
 	}
 
 	/**
@@ -2047,7 +2114,7 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	 * #pw-group-retrieval
 	 * #pw-group-fun-tools
 	 *
-	 * @param string|callable|array $property Property or properties to retrieve, or callable function that shuld receive items.
+	 * @param string|callable|array $property Property or properties to retrieve, or callable function that should receive items.
 	 * @param array $options Options to modify default behavior:
 	 *  - `getMethod` (string): Method to call on each item to retrieve $property (default = "get")
 	 *  - `key` (string|null): Property of Wire objects to use for key of array, or omit (null) for non-associative array (default).
@@ -2431,30 +2498,63 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	 *
 	 */
 	public function __debugInfo() {
-		$info = parent::__debugInfo();
-		$info['count'] = $this->count();
+	
+		$info = array(
+			'count' => $this->count(),
+			'items' => array(),
+		);
+		
+		$info = array_merge($info, parent::__debugInfo());
+		
 		if(count($this->data)) {
 			$info['items'] = array();
 			foreach($this->data as $key => $value) {
-				if(is_object($value)) {
-					if($value instanceof Page) {
-						$value = '/' . ltrim($value->path(), '/');
-					} else if($value instanceof WireData) {
-						$_value = $value;
-						$value = $value->get('name');
-						if(!$value) $value = $_value->get('id');
-						if(!$value) $value = $_value->className();
-					} else {
-						// keep $value as it is
-					}
-				}
-				$info['items'][$key] = $value; 
+				if(is_object($value) && $value instanceof Wire) $key = $value->className() . ":$key";
+				$info['items'][$key] = $this->debugInfoItem($value);
 			}
 		}
+
 		if(count($this->extraData)) $info['extraData'] = $this->extraData;
-		if(count($this->itemsAdded)) $info['itemsAdded'] = $this->itemsAdded;
-		if(count($this->itemsRemoved)) $info['itemsRemoved'] = $this->itemsRemoved;
+		
+		$trackers = array(
+			'itemsAdded' => $this->itemsAdded, 
+			'itemsRemoved' => $this->itemsRemoved
+		);
+		
+		foreach($trackers as $key => $value) {
+			if(!count($value)) continue;
+			$info[$key] = array();
+			foreach($value as $k => $v) {
+				$info[$key][] = $this->debugInfoItem($v); 
+			}
+		}
+		
 		return $info;
+	}
+
+	/**
+	 * Return debug info for one item from this WireArray
+	 * 
+	 * #pw-internal
+	 * 
+	 * @param mixed $item
+	 * @return mixed|null|string
+	 * 
+	 */
+	public function debugInfoItem($item) {
+		if(is_object($item)) {
+			if($item instanceof Page) {
+				$item = $item->debugInfoSmall();
+			} else if($item instanceof WireData) {
+				$_item = $item;
+				$item = $item->get('name');
+				if(!$item) $item = $_item->get('id');
+				if(!$item) $item = $_item->className();
+			} else {
+				// keep $value as it is
+			}
+		}
+		return $item;
 	}
 
 	/**
