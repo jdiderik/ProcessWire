@@ -825,6 +825,7 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	 */
 	public function getRandom($num = 1, $alwaysArray = false) {
 		$items = $this->makeNew(); 
+		if($num < 1) return $items;
 		$count = $this->count();
 		if(!$count) {
 			if($num == 1 && !$alwaysArray) return null;
@@ -1892,6 +1893,8 @@ class WireArray extends Wire implements \IteratorAggregate, \ArrayAccess, \Count
 	protected function trackAdd($item, $key) {
 		if($key) {}
 		if($this->trackChanges()) $this->itemsAdded[] = $item;
+		// wire this WireArray to the same instance of $item, if it isn’t already wired
+		if($this->_wire === null && $item instanceof Wire && $item->isWired()) $item->wire($this);
 	}
 
 	/**

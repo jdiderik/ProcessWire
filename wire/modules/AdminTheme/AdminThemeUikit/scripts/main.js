@@ -85,8 +85,12 @@ var ProcessWireAdminTheme = {
 				// identify active tab and trigger event on it
 				var $activeTab = $tabs.children('.uk-active');
 				if($activeTab.length) {
-					var $activeContent = $($activeTab.find('a').attr('href'));
-					if($activeContent.length) ProcessWireAdminTheme.wireTabClick($activeContent);
+					var href = $activeTab.find('a').attr('href'); 
+					if(href.indexOf('#') === 0) {
+						// href points to an #element id in current document
+						var $activeContent = $(href);
+						if($activeContent.length) ProcessWireAdminTheme.wireTabClick($activeContent);
+					}
 				}
 			}, 500);
 		}
@@ -348,6 +352,7 @@ var ProcessWireAdminTheme = {
 				close: function(event, ui) {
 				},
 				source: function(request, response) {
+					if(request.term === $input.attr('data-help-term')) request.term = 'help';
 					var url = $input.parents('form').attr('data-action') + '?q=' + request.term;
 					$.getJSON(url, function(data) {
 						var len = data.matches.length;
@@ -390,7 +395,9 @@ var ProcessWireAdminTheme = {
 				}
 			}).focus(function() {
 				// $(this).siblings('label').find('i').hide(); // hide icon
+				setTimeout(function() { $input.attr('placeholder', $input.attr('data-help-note')); }, 1250); 
 			}).blur(function() {
+				$input.attr('placeholder', '');
 				// $status.text('');
 				// $(this).siblings('label').find('i').show(); // show icon
 			});
@@ -687,7 +694,7 @@ var ProcessWireAdminTheme = {
 				width += w;
 				if($lastInputfield && width >= 95) {
 					// finishing out row, update last visible column to include the width of the hidden column
-					lastW += widthHidden;
+					// lastW += widthHidden;
 					if(debug) consoleLog('Updating last visible Inputfield to width=' + lastW, $lastInputfield);
 					ukGridClass(lastW, $lastInputfield);
 					width = 0;
@@ -827,6 +834,10 @@ var ProcessWireAdminTheme = {
 		$(document).on('reloaded', function() { initFormMarkup($(this)) }); // function() intentional
 		$(document).on('hideInputfield', showHideInputfield);
 		$(document).on('showInputfield', showHideInputfield);
+		$(document).on('columnWidth', '.Inputfield', function(e, width) {
+			ukGridClass(width, $(this)); 
+			return false;
+		}); 
 
 		$('body').addClass('InputfieldColumnWidthsInit');
 		initFormMarkup();

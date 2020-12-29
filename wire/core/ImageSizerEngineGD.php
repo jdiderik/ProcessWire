@@ -18,6 +18,15 @@
  */
 class ImageSizerEngineGD extends ImageSizerEngine {
 
+	public static function getModuleInfo() {
+		return array(
+			'title' => 'GD Image Sizer',
+			'version' => 1,
+			'summary' => "Uses PHP’s built-in GD library to resize images.",
+			'author' => 'Horst Nogajski',
+		);
+	}
+
 	/**
 	 * @var string
 	 * 
@@ -52,6 +61,30 @@ class ImageSizerEngineGD extends ImageSizerEngine {
 	 */
 	protected function validSourceImageFormats() {
 		return array('JPG', 'JPEG', 'PNG', 'GIF');
+	}
+
+	/**
+	 * Get an array of image file extensions this ImageSizerModule can create
+	 *
+	 * @return array of uppercase file extensions, i.e. ['PNG', 'JPG']
+	 *
+	 */
+	protected function validTargetImageFormats() {
+		$formats = $this->validSourceImageFormats();
+		if($this->supported('webp')) $formats[] = 'WEBP';
+		return $formats;
+	}
+
+	/**
+	 * Get library version string
+	 *
+	 * @return string Returns version string or blank string if not applicable/available
+	 * @since 3.0.138
+	 *
+	 */
+	public function getLibraryVersion() {
+		$gd = gd_info();
+		return isset($gd['GD Version']) ? $gd['GD Version'] : '';
 	}
 
 	/**
@@ -239,7 +272,7 @@ class ImageSizerEngineGD extends ImageSizerEngine {
 
 			// current version is already the desired result, we only may have to compress JPEGs but leave GIF and PNG as is:
 			
-			if(!$isModified && !$this->webpOnly && ($this->imageType == \IMAGETYPE_PNG || $this->imageType == \IMAGETYPE_GIF)) {
+			if(!$isModified && !$this->webpOnly && !$this->webpAdd && ($this->imageType == \IMAGETYPE_PNG || $this->imageType == \IMAGETYPE_GIF)) {
 				$result = @copy($srcFilename, $dstFilename);
 				if(isset($image) && is_resource($image)) @imagedestroy($image); // clean up
 				if(isset($image)) $image = null;

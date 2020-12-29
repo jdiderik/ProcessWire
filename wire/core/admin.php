@@ -55,13 +55,15 @@ function _checkForHttpHostError(Config $config) {
 		$valid = true; 
 	} else if(isset($_SERVER['SERVER_NAME']) && $httpHost === strtolower($_SERVER['SERVER_NAME'])) {
 		$valid = true; 
+	} else if(in_array($httpHost, $config->httpHosts)) {
+		$valid = true; 
 	}
 
 	if(!$valid) $config->error(
 		__('Unrecognized HTTP host:') . "'"  . 
 		htmlentities($_SERVER['HTTP_HOST'], ENT_QUOTES, 'UTF-8') . "' - " . 
 		__('Please update your $config->httpHosts setting in /site/config.php') . " - " . 
-		"<a target='_blank' href='http://processwire.com/api/variables/config/#httphosts'>" . __('read more') . "</a>", 
+		"<a target='_blank' href='https://processwire.com/api/variables/config/#httphosts'>" . __('read more') . "</a>", 
 		Notice::allowMarkup
 		); 
 }
@@ -136,6 +138,7 @@ if($page->process && $page->process != 'ProcessPageView') {
 		}
 
 		$controller = new ProcessController(); 
+		$wire->wire($controller);
 		$controller->setProcessName($page->process); 
 		$initFile = $config->paths->adminTemplates . 'init.php'; 
 		if(is_file($initFile)) {
@@ -154,9 +157,11 @@ if($page->process && $page->process != 'ProcessPageView') {
 		if($process) {} // ignore
 
 	} catch(Wire404Exception $e) {
+		$wire->setStatusFailed($e, "404 from $page->process", $page);
 		$wire->error($e->getMessage()); 
 
 	} catch(WirePermissionException $e) {
+		$wire->setStatusFailed($e, "Permission error from $page->process", $page); 
 
 		if($controller && $controller->isAjax()) {
 			$content = $controller->jsonMessage($e->getMessage(), true); 
@@ -170,6 +175,7 @@ if($page->process && $page->process != 'ProcessPageView') {
 		}
 
 	} catch(\Exception $e) {
+		$wire->setStatusFailed($e, "Error from $page->process", $page); 
 		$msg = $e->getMessage(); 
 		if($config->debug) {
 			$msg = $sanitizer->entities($msg);
@@ -200,7 +206,8 @@ if($ajax) {
 	ob_end_clean();
 }
 
-$config->js(array('httpHost', 'httpHosts'), true); 
+// config properties that should be mirrored to ProcessWire.config.property in JS
+$config->js(array('httpHost', 'httpHosts', 'https'), true); 
 
 if($controller && $controller->isAjax()) {
 	if(empty($content) && count($notices)) $content = $controller->jsonMessage($notices->last()->text); 

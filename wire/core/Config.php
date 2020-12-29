@@ -22,6 +22,7 @@
  *
  * @property bool $ajax If the current request is an ajax (asynchronous javascript) request, this is set to true. #pw-group-runtime
  * @property bool|int $modal If the current request is in a modal window, this is set to a positive number. False if not. #pw-group-runtime
+ * @property bool|int $admin Is current request for logged-in user in admin? True, false, or 0 if not yet known. @since 3.0.142 #pw-group-runtime
  * @property string $httpHost Current HTTP host name. #pw-group-HTTP-and-input
  * @property bool $https If the current request is an HTTPS request, this is set to true. #pw-group-runtime
  * @property string $version Current ProcessWire version string (i.e. "2.2.3") #pw-group-system #pw-group-runtime
@@ -39,6 +40,7 @@
  * 
  * @property bool $protectCSRF Enables CSRF (cross site request forgery) protection on all PW forms, recommended for security. #pw-group-HTTP-and-input
  * 
+ * @property array $imageSizes Predefined image sizes (and options) indexed by name. See /wire/config.php for example. (3.0.151+) #pw-group-images
  * @property array $imageSizerOptions Options to set image sizing defaults. Please see the /wire/config.php file for all options and defaults. #pw-group-images
  * @property array $webpOptions Options for webp images. Please see /wire/config.php for all options. #pw-group-images
  * 
@@ -63,7 +65,7 @@
  * @property bool|callable $sessionAllow Are sessions allowed? Typically boolean true, unless provided a callable function that returns boolean. See /wire/config.php for an example.  #pw-group-session
  * @property int $sessionExpireSeconds How many seconds of inactivity before session expires? #pw-group-session
  * @property bool $sessionChallenge Should login sessions have a challenge key? (for extra security, recommended) #pw-group-session
- * @property bool $sessionFingerprint Should login sessions be tied to IP and user agent? 0 or false: Fingerprint off. 1 or true: Fingerprint on with default/recommended setting (currently 10). 2: Fingerprint only the remote IP. 4: Fingerprint only the forwarded/client IP (can be spoofed). 8: Fingerprint only the useragent. 10: Fingerprint the remote IP and useragent (default). 12: Fingerprint the forwarded/client IP and useragent. 14: Fingerprint the remote IP, forwarded/client IP and useragent (all). #pw-group-session
+ * @property int|bool $sessionFingerprint Should login sessions be tied to IP and user agent? 0 or false: Fingerprint off. 1 or true: Fingerprint on with default/recommended setting (currently 10). 2: Fingerprint only the remote IP. 4: Fingerprint only the forwarded/client IP (can be spoofed). 8: Fingerprint only the useragent. 10: Fingerprint the remote IP and useragent (default). 12: Fingerprint the forwarded/client IP and useragent. 14: Fingerprint the remote IP, forwarded/client IP and useragent (all). #pw-group-session
  * @property int $sessionHistory Number of session entries to keep (default=0, which means off). #pw-group-session
  * @property string $sessionForceIP Force the client IP address returned by $session->getIP() to be this rather than auto-detect (useful with load balancer). Use for setting value only. #pw-group-session
  * @property array $loginDisabledRoles Array of role name(s) or ID(s) of roles where login is disallowed. #pw-group-session
@@ -77,6 +79,7 @@
  * @property string $uploadBadExtensions Space separated list of file extensions that are always disallowed from uploads. #pw-group-files
  * 
  * @property string $adminEmail Email address to send fatal error notifications to. #pw-group-system
+ * @property array $adminTemplates Names of templates that ProcessWire should consider exclusive to the admin. #pw-group-system @since 3.0.142
  * 
  * @property string $pageNameCharset Character set for page names, must be 'ascii' (default, lowercase) or 'UTF8' (uppercase). #pw-group-URLs
  * @property string $pageNameWhitelist Whitelist of characters allowed in UTF8 page names. #pw-group-URLs
@@ -88,6 +91,7 @@
  * @property int $maxUrlDepth Maximum URL/path slashes (depth) for request URLs. (Min=10, Max=60) #pw-group-URLs
  * @property string $wireInputOrder Order that variables with the $input API var are handled when you access $input->var. #pw-group-HTTP-and-input
  * @property bool $wireInputLazy Specify true for $input API var to load input data in a lazy fashion and potentially use less memory. Default is false. #pw-group-HTTP-and-input
+ * @property array $cookieOptions Options for setting cookies from $input->cookie #pw-group-HTTP-and-input
  * 
  * @property bool $advanced Special mode for ProcessWire system development. Not recommended for regular site development or production use. #pw-group-system
  * @property bool $demo Special mode for demonstration use that causes POST requests to be disabled. Applies to core, but may not be safe with 3rd party modules. #pw-group-system
@@ -126,31 +130,39 @@
  * @property string $moduleServiceKey API key for modules web service #pw-group-modules
  * @property bool $moduleCompile Allow use of compiled modules? #pw-group-modules
  * @property array $wireMail Default WireMail module settings. #pw-group-modules
+ * @property array $moduleInstall Admin module install options you allow. #pw-group-modules
  * 
  * @property array $substituteModules Associative array with names of substitute modules for when requested module doesn't exist #pw-group-modules
  * @property array $logs Additional core logs to keep #pw-group-admin
  * @property bool $logIP Include IP address in logs, when applicable? #pw-group-admin
  * @property string $defaultAdminTheme Default admin theme: AdminThemeDefault or AdminThemeReno #pw-group-admin
  * @property string $fatalErrorHTML HTML used for fatal error messages in HTTP mode. #pw-group-system
+ * @property int $fatalErrorCode HTTP code to send on fatal error (typically 500 or 503). #pw-group-system
  * @property array $modals Settings for modal windows #pw-group-admin
  * @property array $preloadCacheNames Cache names to preload at beginning of request #pw-group-system
  * @property bool $allowExceptions Allow Exceptions to propagate? (default=false, specify true only if you implement your own exception handler) #pw-group-system
  * @property bool $usePoweredBy Use the x-powered-by header? Set to false to disable. #pw-group-system
  * @property bool $useFunctionsAPI Allow most API variables to be accessed as functions? (see /wire/core/FunctionsAPI.php) #pw-group-system
  * @property bool $useMarkupRegions Enable support for front-end markup regions? #pw-group-system
+ * @property bool $usePageClasses Use custom Page classes in `/site/classes/[TemplateName]Page.php`? #pw-group-system #since 3.0.152
  * @property int $lazyPageChunkSize Chunk size for for $pages->findMany() calls. #pw-group-system
  * 
  * @property string $userAuthSalt Salt generated at install time to be used as a secondary/non-database salt for the password system. #pw-group-session
  * @property string $userAuthHashType Default is 'sha1' - used only if Blowfish is not supported by the system. #pw-group-session
+ * @property string $tableSalt #pw-group-system Additional hash for other (non-authentication) purposes, present only on installations start from 3.0.164+. #pw-group-system
  * 
  * @property bool $internal This is automatically set to FALSE when PW is externally bootstrapped. #pw-group-runtime
  * @property bool $external This is automatically set to TRUE when PW is externally bootstrapped. #pw-internal
  * @property bool $cli This is automatically set to TRUE when PW is booted as a command line (non HTTP) script. #pw-group-runtime
+ * @property string $serverProtocol Current server protocol, one of: HTTP/1.1, HTTP/1.0, HTTP/2, or HTTP/2.0. #pw-group-runtime #since 3.0.166
  * @property string $versionName This is automatically populated with the current PW version name (i.e. 2.5.0 dev) #pw-group-runtime
  * @property int $inputfieldColumnWidthSpacing Used by some admin themes to commmunicate to InputfieldWrapper at runtime. #pw-internal
+ * @property array InputfieldWrapper Settings specific to InputfieldWrapper class #pw-internal
  * @property bool $debugMarkupQA Set to true to make the MarkupQA class report verbose debugging messages (to superusers). #pw-internal
  * @property array $markupQA Optional settings for MarkupQA class used by FieldtypeTextarea module. #pw-group-modules
  * @property string|null $pagerHeadTags Populated at runtime to contain `<link rel=prev|next />` tags for document head, after pagination has been rendered by MarkupPagerNav module. #pw-group-runtime 
+ * @property array $statusFiles File inclusions for ProcessWire’s runtime statuses/states. #pw-group-system @since 3.0.142
+ * @property int $status Value of current system status/state corresponding to ProcessWire::status* constants. #pw-internal
  * 
  * @property int $rootPageID Page ID of homepage (usually 1) #pw-group-system-IDs
  * @property int $adminRootPageID Page ID of admin root page #pw-group-system-IDs
@@ -181,6 +193,28 @@ class Config extends WireData {
 	 * 
 	 */
 	const debugVerbose = 2;
+
+	/**
+	 * Get config property
+	 * 
+	 * @param string $key
+	 * @return string|array|int|bool|object|callable|null
+	 * 
+	 */
+	public function get($key) {
+		$value = parent::get($key);
+		if($value === null) {
+			// runtime properties
+			if($key === 'serverProtocol') {
+				$value = $this->serverProtocol();
+			} else if($key === 'tableSalt') {
+				$value = parent::get('installed');
+				if(!$value) $value = @filemtime($this->paths->assets . 'active.php'); 
+				$this->data['tableSalt'] = $value;
+			}
+		}
+		return $value;
+	}
 
 	/**
 	 * Get URL for requested resource or module
@@ -215,6 +249,149 @@ class Config extends WireData {
 	 */
 	public function urls($for = '') { 
 		return $for === '' ? $this->urls : $this->url($for); 
+	}
+
+	/**
+	 * Given a directory to a named location, updates $config->paths and $config->urls for it
+	 * 
+	 * - Paths relative to PW installation root should omit the leading slash, i.e. use `site/templates/` and NOT `/site/templates/`.
+	 * 
+	 * - If specifying just the `$dir` argument, it updates both `$config->paths` and `$config->urls` for it.
+	 * 
+	 * - If specifying both `$dir` and `$url` arguments, then `$dir` refers to `$config->paths` and `$url` refers to `$config->urls`.
+	 * 
+	 * - The `$for` argument can be: `cache`, `logs`, `files`, `tmp`, `templates`, or one of your own. Other named locations may
+	 *   also work, but since they can potentially be used before PW’s “ready” state, they may not be reliable.
+	 * 
+	 * - **Warning:** anything that changes a system URL may make the URL no longer have the protection of the root .htaccess file.
+	 *   As a result, if you modify system URLs for anything on a live server, you should also update your .htaccess file to
+	 *   reflect your changes (while leaving existing rules for original URL in place).
+	 * 
+	 * The following example would be in /site/init.php or /site/ready.php (or equivalent module method). In this example we
+	 * are changing the location (path and URL) of our /site/templates/ to use a new version of the files in /site/dev-templates/
+	 * so that we can test them out with user 'karen', while all other users on the site get our regular templates. 
+	 * ~~~~~
+	 * // change templates path and URL to /site/dev-templates/ when user name is 'karen'
+	 * if($user->name == 'karen') {
+	 *   $config->setLocation('templates', 'site/dev-templates/'); 
+	 * }
+	 * ~~~~~
+	 * 
+	 * @param string $for Named location from `$config->paths` or `$config->urls`, one of: `cache`, `logs`, `files`, `tmp`, `templates`, or your own. 
+	 * @param string $dir Directory or URL to the location. Should be either a path or URL relative to current installation root (recommended), 
+	 *   or an absolute disk path that resolves somewhere in current installation root. If specifying an absolute path outside of the installation
+	 *   root, then you’ll also want to provide the $url argument since PW won’t know it. You may also specify a blank string for this argument 
+	 *   if you only want to set the $url argument. 
+	 * @param string|bool $url If the $dir argument represents both the path and URL relative to site root, you can omit this argument. 
+	 *   If path and URL cannot be derived from one another, or you only want to modify the $url (leaving $dir blank), you 
+	 *   can specify the URL in this argument. Specify boolean false if you only want to set the $dir (path) and not detect the $url from it. 
+	 * @return self
+	 * @throws WireException If request cannot be accommodated
+	 * @since 3.0.141
+	 * 
+	 */
+	public function setLocation($for, $dir, $url = '') {
+		
+		if($for === 'root') throw new WireException('Root path can only be changed at boot');
+		
+		if(!empty($dir)) {
+			$rootPath = $this->paths->get('root');
+			
+			// make sure path uses unix-style slashes
+			$dir = Paths::normalizeSeparators($dir);
+
+			// if given path is inclusive of root path, make path relative to site root
+			if(strpos($dir, $rootPath) === 0) $dir = substr($dir, strlen($rootPath));
+
+			// ensure trailing slash
+			if(substr($dir, -1) !== '/') $dir .= '/';
+		}
+		
+		// now determine the URL to set
+		if($url === false) {
+			// arguments say to skip setting URL
+		} else if(empty($url)) {
+			// URL and path are the same relative to site root
+			if(!empty($dir)) $url = $dir;
+		} else {
+			// given a custom URL
+			$rootUrl = $this->urls->get('root');
+			// if URL begins at PW installation root, remove the root part of the URL
+			if(strpos($url, $rootUrl) === 0) $url = substr($url, strlen($rootUrl)); 
+			// ensure trailing slash
+			if(substr($url, -1) !== '/' && strpos($url, '?') === false && strpos($url, '#') === false) $url .= '/';
+		}
+		
+		if(!empty($dir)) $this->paths->set($for, $dir);
+		if(!empty($url)) $this->urls->set($for, $url);
+		
+		return $this;
+	}
+
+	/**
+	 * Change or set just the server disk path for the named location (leaving URL as-is)
+	 * 
+	 * - If you want to update both disk path and URL at the same time, or if URL and path are going to be the same relative to 
+	 *   installation root, use the `setLocation()` method instead.
+	 * 
+	 * - Paths relative to PW installation root should omit the leading slash, i.e. use `site/templates/` and NOT `/site/templates/`.
+	 * 
+	 * - The `$for` argument can be: `cache`, `logs`, `files`, `tmp`, `templates`, or one of your own. Other named locations may
+	 *   also work, but since they can potentially be used before PW’s “ready” state, they may not be reliable.
+	 * 
+	 * @param string $for Named location from `$config->paths`, one of: `cache`, `logs`, `files`, `tmp`, `templates`, or your own. 
+	 * @param string $path Path relative to PW installation root (no leading slash), or absolute path if not. 
+	 * @return self
+	 * @throws WireException
+	 * @since 3.0.141
+	 * 
+	 */
+	public function setPath($for, $path) {
+		return $this->setLocation($for, $path, false);
+	}
+
+	/**
+	 * Change or set just the URL for the named location (leaving server disk path as-is)
+	 * 
+	 * - If you want to update both disk path and URL at the same time, or if URL and path are going to be the same relative to 
+	 *   installation root, use the `setLocation()` method instead.
+	 *
+	 * - Paths relative to PW installation root should omit the leading slash, i.e. use `site/templates/` and NOT `/site/templates/`.
+	 *
+	 * - The `$for` argument can be: `cache`, `logs`, `files`, `tmp`, `templates`, or one of your own. Other named locations may
+	 *   also work, but since they can potentially be used before PW’s “ready” state, they may not be reliable.
+	 * 
+	 * - **Warning:** anything that changes a system URL may make the URL no longer have the protection of the root .htaccess file.
+	 *   As a result, if you modify system URLs for anything on a live server, you should also update your .htaccess file to
+	 *   reflect your changes (while leaving existing rules for original URL in place).
+	 * 
+	 * The following examples would go in /site/ready.php. 
+	 * 
+	 * Let’s say we created a symbolic link in our web root `/tiedostot/` (Finnish for “files”) that points to /site/assets/files/.
+	 * We want all of our file URLs to appear as “/tiedostot/1234/img.jpg” rather than “/site/assets/files/1234/img.jpg”. We would
+	 * change the URL for ProcessWire’s `$config->urls->files` to point there like this example below. (Please also see warning above)
+	 * ~~~~~
+	 * if($page->template != 'admin') {
+	 *   $config->setUrl('files', 'tiedostot/'); 
+	 * }
+	 * ~~~~~
+	 * In this next example, we are changing all of our file URLs on the front-end to point a cookieless subdomain that maps all 
+	 * requests to the root path of https://files.domain.com to /site/assets/files/. The example works for CDNs as well. 
+	 * ~~~~~
+	 * if($page->template != 'admin) {
+	 *   $config->setUrl('files', 'https://files.domain.com/'); 
+	 * }
+	 * ~~~~~
+	 *
+	 * @param string $for Named location from `$config->urls`, one of: `cache`, `logs`, `files`, `tmp`, `templates`, or your own. 
+	 * @param string $url URL relative to PW installation root (no leading slash) or absolute URL if not (optionally including scheme and domain).
+	 * @return self
+	 * @throws WireException
+	 * @since 3.0.141
+	 *
+	 */
+	public function setUrl($for, $url) {
+		return $this->setLocation($for, '', $url);
 	}
 
 	/**
@@ -493,6 +670,21 @@ class Config extends WireData {
 	public function installedBefore($date) {
 		if(!ctype_digit("$date")) $date = strtotime($date);
 		return $this->installed < $date; 
+	}
+
+	/**
+	 * Get current server protocol (for example: "HTTP/1.1")
+	 * 
+	 * This can be accessed by property `$config->serverProtocol`
+	 * 
+	 * @return string
+	 * @since 3.0.166
+	 * 
+	 */
+	protected function serverProtocol() {
+		$protos = array('HTTP/1.1', 'HTTP/1.0', 'HTTP/2', 'HTTP/2.0');
+		$proto = isset($_SERVER['SERVER_PROTOCOL']) ? $_SERVER['SERVER_PROTOCOL'] : 'HTTP/1.1';
+		return $protos[(int) array_search($proto, $protos, true)];
 	}
 	
 	/**

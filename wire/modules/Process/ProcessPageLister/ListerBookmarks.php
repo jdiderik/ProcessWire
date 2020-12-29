@@ -59,8 +59,16 @@ class ListerBookmarks extends Wire {
 	 *
 	 */
 	protected $user;
-	
+
+	/**
+	 * Construct
+	 *
+	 * @param Page $page
+	 * @param User $user
+	 * 
+	 */
 	public function __construct(Page $page, User $user) {
+		$page->wire($this);
 		$this->page = $page;
 		$this->user = $user;
 		parent::__construct();
@@ -105,7 +113,7 @@ class ListerBookmarks extends Wire {
 			$bookmarkID = $this->bookmarkStrID($bookmarkID, self::typeOwned);
 			$bookmark = $this->wakeupBookmark($bookmark, $bookmarkID, self::typeOwned);
 			if(!$bookmark) continue;
-			if($userID && !$userID != $this->user->id && empty($bookmark['share'])) continue;
+			if($userID && $userID != $this->user->id && empty($bookmark['share'])) continue;
 			$bookmarks[$bookmarkID] = $bookmark;
 		}
 

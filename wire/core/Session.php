@@ -63,8 +63,23 @@ class Session extends Wire implements \IteratorAggregate {
 	 * Fingerprint bitmask: Use user agent (recommended)
 	 *
 	 */
-	const fingerprintUseragent = 8; 
+	const fingerprintUseragent = 8;
 	
+	/**
+	 * Fingerprint bitmask: Use “accept” content-types header
+	 *
+	 * @since 3.0.159
+	 *
+	 */
+	const fingerprintAccept = 16;
+
+	/**
+	 * Suffix applied to challenge cookies
+	 * 
+	 * @since 3.0.141
+	 * 
+	 */
+	const challengeSuffix = '_challenge';
 
 	/**
 	 * Reference to ProcessWire $config object
@@ -95,6 +110,22 @@ class Session extends Wire implements \IteratorAggregate {
 	 * 
 	 */
 	protected $sessionInit = false;
+
+	/**
+	 * Are sessions allowed?
+	 * 
+	 * @var bool|null
+	 * 
+	 */
+	protected $sessionAllow = null;
+
+	/**
+	 * Instance of custom session handler module, when in use (null when not)
+	 * 
+	 * @var WireSessionHandler|null
+	 * 
+	 */
+	protected $sessionHandler = null;
 
 	/**
 	 * Name of key/index within $_SESSION where PW keeps its session data
@@ -140,7 +171,7 @@ class Session extends Wire implements \IteratorAggregate {
 	public function __construct(ProcessWire $wire) {
 
 		$wire->wire($this);
-		$this->config = $wire->wire('config'); 
+		$this->config = $wire->wire()->config;
 		$this->sessionKey = $this->className();
 		
 		$instanceID = $wire->getProcessWireInstanceID();
@@ -163,6 +194,8 @@ class Session extends Wire implements \IteratorAggregate {
 		} else {
 			$sessionAllow = true;
 		}
+		
+		$this->sessionAllow = $sessionAllow;
 		
 		if($sessionAllow) {
 			$this->init();
@@ -198,7 +231,7 @@ class Session extends Wire implements \IteratorAggregate {
 		} else {
 			$name = $this->config->sessionName;
 		}
-		if($checkLogin) $name .= "_challenge";
+		if($checkLogin) $name .= self::challengeSuffix;
 		return !empty($_COOKIE[$name]);
 	}
 
@@ -213,7 +246,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 */
 	public function ___init() {
 
-		if($this->sessionInit) return;
+		if($this->sessionInit || !$this->sessionAllow) return;
 		if(!$this->config->sessionName) return;
 		$this->sessionInit = true;
 
@@ -284,7 +317,8 @@ class Session extends Wire implements \IteratorAggregate {
 
 		// check challenge cookie
 		if($this->config->sessionChallenge) {
-			if(empty($_COOKIE[$sessionName . "_challenge"]) || ($this->get('_user', 'challenge') != $_COOKIE[$sessionName . "_challenge"])) {
+			$cookieName = $sessionName . self::challengeSuffix;
+			if(empty($_COOKIE[$cookieName]) || ($this->get('_user', 'challenge') != $_COOKIE[$cookieName])) {
 				$valid = false; 
 				$reason = "Error: Invalid challenge value";
 			}
@@ -338,23 +372,33 @@ class Session extends Wire implements \IteratorAggregate {
 	/**
 	 * Generate a session fingerprint
 	 *
-	 * If the `$mode` argument is omitted, the mode is pulled from `$config->sessionFingerprint`. If using the
-	 * mode argument, specify one of the following: 
+	 * If the `$mode` argument is omitted, the mode is pulled from `$config->sessionFingerprint`. 
+	 * If using the mode argument, specify one of the following:
 	 * 
-	 *  - 0 or false: Fingerprint nothing.
-	 *  - 1 or true: Fingerprint on with default/recommended setting (currently 10).
-	 *  - 2: Fingerprint only the remote IP.
-	 *  - 4: Fingerprint only the forwarded/client IP (can be spoofed).
-	 *  - 8: Fingerprint only the useragent.
-	 *  - 10: Fingerprint the remote IP and useragent (default).
-	 *  - 12: Fingerprint the forwarded/client IP and useragent.
-	 *  - 14: Fingerprint the remote IP, forwarded/client IP and useragent (all).
-	 * 
-	 * If using fingerprint in an environment where the user’s IP address may change during the session, you should
-	 * fingerprint only the useragent, or disable fingerprinting.
-	 * 
-	 * If using fingerprint with an AWS load balancer, you should use one of the options that uses the “client IP” 
-	 * rather than the “remote IP”, fingerprint only the useragent, or disable fingerprinting. 
+	 * - 2: Remote IP
+	 * - 4: Forwarded/client IP (can be spoofed)
+	 * - 8: Useragent
+	 * - 16: Accept header
+	 *
+	 * To use the custom `$mode` settings above, select one or more of those you want
+	 * to fingerprint, note the numbers, and determine the `$mode` like this:
+	 * ~~~~~~
+	 * // to fingerprint just remote IP
+	 * $mode = 2;
+	 *
+	 * // to fingerprint remote IP and useragent:
+	 * $mode = 2 | 8;
+	 *
+	 * // to fingerprint remote IP, useragent and accept header:
+	 * $mode = 2 | 8 | 16;
+	 * ~~~~~~
+	 * If using fingerprint in an environment where the user’s IP address may
+	 * change during the session, you should fingerprint only the useragent
+	 * and/or accept header, or disable fingerprinting.
+	 *
+	 * If using fingerprint with an AWS load balancer, you should use one of
+	 * the options that uses the “client IP” rather than the “remote IP”,
+	 * fingerprint only useragent and/or accept header, or disable fingerprinting.
 	 * 
 	 * #pw-internal
 	 * 
@@ -369,9 +413,9 @@ class Session extends Wire implements \IteratorAggregate {
 		$useFingerprint = $mode === null ? $this->config->sessionFingerprint : $mode;
 		
 		if(!$useFingerprint) return false;
-
-		if(is_bool($useFingerprint) || $useFingerprint == 1) {
-			// default (boolean true)
+		
+		if($useFingerprint === true || $useFingerprint === 1 || $useFingerprint === "1") {
+			// default (boolean true or int 1)
 			$useFingerprint = self::fingerprintRemoteAddr | self::fingerprintUseragent;
 			if($debug) $debugInfo[] = 'default';
 		}
@@ -391,6 +435,11 @@ class Session extends Wire implements \IteratorAggregate {
 		if($useFingerprint & self::fingerprintUseragent) {
 			$fingerprint .= isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
 			if($debug) $debugInfo[] = 'useragent';
+		}
+		
+		if($useFingerprint & self::fingerprintAccept) {
+			$fingerprint .= isset($_SERVER['HTTP_ACCEPT']) ? $_SERVER['HTTP_ACCEPT'] : '';
+			if($debug) $debugInfo[] = 'accept';
 		}
 		
 		if($debug) {
@@ -432,7 +481,7 @@ class Session extends Wire implements \IteratorAggregate {
 	 *
 	 */
 	public function get($key, $_key = null) {
-		if($key == 'CSRF') {
+		if($key === 'CSRF') {
 			return $this->CSRF();
 		} else if(!is_null($_key)) {
 			// namespace
@@ -486,6 +535,18 @@ class Session extends Wire implements \IteratorAggregate {
 		} else {
 			return $this->data;
 		}
+	}
+
+	/**
+	 * Get all session variables for given namespace and return associative array
+	 * 
+	 * @param string|Wire $ns
+	 * @return array
+	 * @since 3.0.141 Method added for consistency, but any version can do this with $session->getFor($ns, '');
+	 * 
+	 */
+	public function getAllFor($ns) {
+		return $this->getFor($ns, '');
 	}
 
 	/**
@@ -857,12 +918,12 @@ class Session extends Wire implements \IteratorAggregate {
 
 			if($this->config->sessionChallenge) {
 				// create new challenge
-				$pass = $this->wire(new Password());
-				$challenge = $pass->randomBase64String(32);
+				$rand = new WireRandom();
+				$challenge = $rand->base64(32);
 				$this->set('_user', 'challenge', $challenge); 
 				$secure = $this->config->sessionCookieSecure ? (bool) $this->config->https : false;
 				// set challenge cookie to last 30 days (should be longer than any session would feasibly last)
-				setcookie(session_name() . '_challenge', $challenge, time()+60*60*24*30, '/', 
+				setcookie(session_name() . self::challengeSuffix, $challenge, time()+60*60*24*30, '/', 
 					$this->config->sessionCookieDomain, $secure, true); 
 			}
 
@@ -1055,9 +1116,30 @@ class Session extends Wire implements \IteratorAggregate {
 		if(isset($_COOKIE[$sessionName])) {
 			setcookie($sessionName, '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
 		}
-		if(isset($_COOKIE[$sessionName . "_challenge"])) {
-			setcookie($sessionName . "_challenge", '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
+		if(isset($_COOKIE[$sessionName . self::challengeSuffix])) {
+			setcookie($sessionName . self::challengeSuffix, '', $time, '/', $this->config->sessionCookieDomain, $secure, true);
 		}
+	}
+
+	/**
+	 * Get the names of all cookies managed by Session
+	 * 
+	 * #pw-internal
+	 * 
+	 * @return array
+	 * @since 3.0.141
+	 * 
+	 */
+	public function getCookieNames() {
+		$name = $this->config->sessionName;
+		$nameSecure = $this->config->sessionNameSecure;
+		if(empty($nameSecure)) $nameSecure = $this->config->sessionName . 's';
+		$a = array($name, $nameSecure); 
+		if($this->config->sessionChallenge) {
+			$a[] = $name . self::challengeSuffix;
+			$a[] = $nameSecure . self::challengeSuffix;
+		}
+		return $a;
 	}
 
 	/**
@@ -1083,15 +1165,29 @@ class Session extends Wire implements \IteratorAggregate {
 	 * ~~~~~
 	 * 
 	 * @param string $url URL to redirect to
-	 * @param bool $http301 Should this be a permanent (301) redirect? (default=true). If false, it is a 302 temporary redirect.
+	 * @param bool|int $status Specify true for 301 permanent redirect, false for 302 temporary redirect, or 
+	 *   in 3.0.166+ you can also specify the status code (integer) rather than boolean. 
+	 *   Default is 301 (permanent). 
 	 *
 	 */
-	public function ___redirect($url, $http301 = true) {
+	public function ___redirect($url, $status = 301) {
+		
+		$page = $this->wire()->page;
+
+		if($status === true || "$status" === "301" || "$status" === "1") {
+			$status = 301;
+		} else if($status === false || "$status" === "302" || "$status" === "0") {
+			$status = 302;
+		} else {
+			$status = (int) $status;
+			// if invalid redirect http status code, fallback to 302
+			if($status < 300 || $status > 399) $status = 302;
+		}
 
 		// if there are notices, then queue them so that they aren't lost
 		if($this->sessionInit) {
-			$notices = $this->wire('notices');
-			if(count($notices)) {
+			$notices = $this->wire()->notices;
+			if($notices && count($notices)) {
 				foreach($notices as $notice) {
 					$this->queueNotice($notice);
 				}
@@ -1099,21 +1195,50 @@ class Session extends Wire implements \IteratorAggregate {
 		}
 
 		// perform the redirect
-		$page = $this->wire('page');
 		if($page) {
-			// ensure ProcessPageView is properly closed down
-			$process = $this->wire('modules')->get('ProcessPageView'); 
-			$process->setResponseType(ProcessPageView::responseTypeRedirect); 
-			$process->finished();
-			// retain modal=1 get variables through redirects (this can be moved to a hook later)
-			if($page->template == 'admin' && $this->wire('input')->get('modal') && strpos($url, '//') === false) {
-				if(!strpos($url, 'modal=')) $url .= (strpos($url, '?') !== false ? '&' : '?') . 'modal=1'; 
+			$process = $this->wire()->process; 
+			if("$process" !== "ProcessPageView") {
+				$process = $this->wire()->modules->get('ProcessPageView');
+			}
+			/** @var ProcessPageView $process */
+			if($process) {
+				// ensure ProcessPageView is properly closed down
+				$process->setResponseType(ProcessPageView::responseTypeRedirect);
+				$process->finished();
+				// retain modal=1 get variables through redirects (this can be moved to a hook later)
+				$input = $this->wire()->input;
+				if($page->template == 'admin' && $input && $input->get('modal') && strpos($url, '//') === false) {
+					if(!strpos($url, 'modal=')) $url .= (strpos($url, '?') !== false ? '&' : '?') . 'modal=1';
+				}
 			}
 		}
-		$this->wire()->setStatus(ProcessWire::statusFinished);
-		if($http301) header("HTTP/1.1 301 Moved Permanently");
-		header("Location: $url");
+		
+		$this->wire()->setStatus(ProcessWire::statusFinished, array(
+			'redirectUrl' => $url,
+			'redirectType' => $status, 
+		));
+		
+		// note for 302 redirects we send no header other than 'Location: url'
+		$http = new WireHttp();
+		$this->wire($http);
+		if($status != 302) $http->sendStatusHeader($status);
+		$http->sendHeader("Location: $url");
+		
 		exit(0);
+	}
+
+	/**
+	 * Perform a temporary (302) redirect
+	 * 
+	 * This is an alias of `$session->redirect($url, false);` that sends only the
+	 * location header, which translates to a 302 redirect. 
+	 * 
+	 * @param string $url
+	 * @since 3.0.166 
+	 * 
+	 */
+	public function location($url) {
+		$this->redirect($url, false); 
 	}
 
 	/**
@@ -1369,5 +1494,22 @@ class Session extends Wire implements \IteratorAggregate {
 		if(is_null($this->CSRF)) $this->CSRF = $this->wire(new SessionCSRF());
 		return $this->CSRF; 
 	}
+	
+	/**
+	 * Get or set current session handler instance (WireSessionHandler)
+	 *
+	 * #pw-internal
+	 *
+	 * @param WireSessionHandler|null $sessionHandler Specify only when setting, omit to get session handler. 
+	 * @return null|WireSessionHandler Returns WireSessionHandler instance, or…
+	 *   returns null when session handler is not yet known or is PHP (file system)
+	 * @since 3.0.166
+	 *
+	 */
+	public function sessionHandler(WireSessionHandler $sessionHandler = null) {
+		if($sessionHandler) $this->sessionHandler = $sessionHandler;
+		return $this->sessionHandler;
+	}
+
 
 }

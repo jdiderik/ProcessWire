@@ -5,11 +5,72 @@
  *
  * #pw-summary Maintains a collection of Fieldtype modules.
  * 
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2020 by Ryan Cramer
  * https://processwire.com
+ *
+ * @property FieldtypeCheckbox $FieldtypeCheckbox
+ * @property FieldtypeCheckbox $checkbox
+ * 
+ * @property FieldtypeComments|null $FieldtypeComments
+ * @property FieldtypeComments|null $comments
+ * 
+ * @property FieldtypeDatetime $FieldtypeDatetime
+ * @property FieldtypeDatetime $datetime
+ * 
+ * @property FieldtypeEmail $FieldtypeEmail
+ * @property FieldtypeEmail $email
+ * 
+ * @property FieldtypeFile $file
+ * @property FieldtypeFile $FieldtypeFile
+ * 
+ * @property FieldtypeFloat $FieldtypeFloat
+ * @property FieldtypeFloat $float
+ * 
+ * @property FieldtypeImage $FieldtypeImage
+ * @property FieldtypeImage $image
+ * 
+ * @property FieldtypeInteger $FieldtypeInteger
+ * @property FieldtypeInteger $integer
+ * 
+ * @property FieldtypeModule $FieldtypeModule
+ * @property FieldtypeModule $module
+ * 
+ * @property FieldtypeOptions|null $FieldtypeOptions
+ * @property FieldtypeOptions|null $options
+ * 
+ * @property FieldtypePage $FieldtypePage
+ * @property FieldtypePage $page
+ * 
+ * @property FieldtypePageTable $FieldtypePageTable
+ * @property FieldtypePageTable $pageTable
+ * 
+ * @property FieldtypePageTitle $FieldtypePageTitle
+ * @property FieldtypePageTitle $pageTitle
+ * 
+ * @property FieldtypePassword $FieldtypePassword
+ * @property FieldtypePassword $password
+ * 
+ * @property FieldtypeRepeater|null $FieldtypeRepeater
+ * @property FieldtypeRepeater|null $repeater
+ * 
+ * @property FieldtypeSelector|null $FieldtypeSelector
+ * @property FieldtypeSelector|null $selector
+ * 
+ * @property FieldtypeText $FieldtypeText
+ * @property FieldtypeText $text
+ * 
+ * @property FieldtypeTextarea $FieldtypeTextarea
+ * @property FieldtypeTextarea $textarea
+ * 
+ * @property FieldtypeToggle|null $FieldtypeToggle
+ * @property FieldtypeToggle|null $toggle
+ * 
+ * @property FieldtypeURL $FieldtypeURL
+ * @property FieldtypeURL $URL
  *
  *
  */
+
 class Fieldtypes extends WireArray {
 
 	/**
@@ -19,12 +80,21 @@ class Fieldtypes extends WireArray {
 	protected $preloaded = false;
 
 	/**
-	 * Construct this Fieldtypes object and load all Fieldtype modules 
+	 * Is this the $fieldtypes API var?
+	 * 
+	 * @var bool
+	 * 
+	 */
+	protected $isAPI = false;
+
+	/**
+	 * Construct the $fieldtypes API var (load all Fieldtype modules into it)
 	 *
  	 */
 	public function init() {
-		foreach($this->wire('modules') as $module) {
-			if(strpos($module->className(), 'Fieldtype') === 0) {
+		$this->isAPI = true;
+		foreach($this->wire('modules') as $name => $module) {
+			if(strpos($name, 'Fieldtype') === 0) {
 				// if($module instanceof ModulePlaceholder) $module = $this->wire('modules')->get($module->className());
 				$this->add($module); 
 			}
@@ -37,12 +107,13 @@ class Fieldtypes extends WireArray {
 	 */
 	protected function preload() {
 		if($this->preloaded) return;
-		$debug = $this->wire('config')->debug; 
+		$debug = $this->isAPI && $this->wire('config')->debug; 
 		if($debug) Debug::timer('Fieldtypes.preload'); 
-		foreach($this->data as $key => $module) {
+		$modules = $this->wire('modules'); /** @var Modules $modules */
+		foreach($this->data as $moduleName => $module) {
 			if($module instanceof ModulePlaceholder) {
-				$fieldtype = $this->wire('modules')->get($module->className()); 
-				$this->data[$key] = $fieldtype; 
+				$fieldtype = $modules->getModule($moduleName); 
+				$this->data[$moduleName] = $fieldtype; 
 			}
 		}
 		if($debug) Debug::saveTimer('Fieldtypes.preload'); 
@@ -57,11 +128,13 @@ class Fieldtypes extends WireArray {
 	 *
 	 */
 	public function isValidItem($item) {
-		return $item instanceof Fieldtype || $item instanceof ModulePlaceholder; 
+		if($item instanceof Fieldtype) return true;
+		if($item instanceof ModulePlaceholder && strpos($item->className(), 'Fieldtype') === 0) return true;
+		return false;
 	}
 
 	/**
-	 * Per the WireArray interface, keys must be strings (field names)
+	 * Per the WireArray interface, keys must be strings (fieldtype class names)
 	 * 
 	 * @param string|int $key
 	 * @return bool
@@ -118,12 +191,13 @@ class Fieldtypes extends WireArray {
 		if(strpos($key, 'Fieldtype') !== 0) $key = "Fieldtype" . ucfirst($key); 
 
 		if(!$fieldtype = parent::get($key)) {
-			$fieldtype = $this->wire('modules')->get($key); 
+			$fieldtype = $this->wire()->modules->getModule($key); 
+			if($fieldtype) $this->set($key, $fieldtype);
 		}
 
 		if($fieldtype instanceof ModulePlaceholder) {
-			$fieldtype = $this->wire('modules')->get($fieldtype->className()); 			
-			$this->set($key, $fieldtype); 
+			$fieldtype = $this->wire()->modules->getModule($fieldtype->className()); 			
+			if($fieldtype) $this->set($key, $fieldtype); 
 		}
 
 		return $fieldtype; 

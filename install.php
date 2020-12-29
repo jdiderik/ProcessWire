@@ -105,26 +105,26 @@ class Installer {
 		
 		require("./wire/modules/AdminTheme/AdminThemeUikit/install-head.inc"); 
 
-		if(isset($_POST['step'])) switch($_POST['step']) {
-			
-			case 0: $this->initProfile(); break;
-
-			case 1: $this->compatibilityCheck(); break;
-
-			case 2: $this->dbConfig();  break;
-
-			case 4: $this->dbSaveConfig();  break;
-
-			case 5: require("./index.php");
-				/** @var ProcessWire $wire */
-				$wire->modules->refresh();
-				$this->adminAccountSave($wire); 
-				break;
-
-			default: 
-				$this->welcome();
-
-		} else $this->welcome();
+		$step = $this->post('step');
+		
+		if($step === null) {
+			$this->welcome();
+		} else {
+			$step = (int) $step;
+			switch($step) {
+				case 0: $this->initProfile(); break;
+				case 1: $this->compatibilityCheck(); break;
+				case 2: $this->dbConfig();  break;
+				case 4: $this->dbSaveConfig();  break;
+				case 5: require("./index.php");
+					/** @var ProcessWire $wire */
+					$wire->modules->refresh();
+					$this->adminAccountSave($wire);
+					break;
+				default:
+					$this->welcome();
+			} 
+		}
 
 		require("./wire/modules/AdminTheme/AdminThemeUikit/install-foot.inc"); 
 	}
@@ -266,10 +266,10 @@ class Installer {
 		} else if(is_dir("./site/")) {
 			$this->alertOk("Found /site/ — already installed? ");
 
-		} else if(isset($_POST['profile'])) {
+		} else if($this->post('profile')) {
 			
 			$profiles = $this->findProfiles();
-			$profile = preg_replace('/[^-a-zA-Z0-9_]/', '', $_POST['profile']);
+			$profile = $this->post('profile', 'name'); 
 			if(empty($profile) || !isset($profiles[$profile]) || !is_dir(dirname(__FILE__) . "/$profile")) {
 				$this->alertErr("Profile not found");
 				$this->selectProfile();
@@ -587,14 +587,17 @@ class Installer {
 		// file permissions
 		$fields = array('chmodDir', 'chmodFile');
 		foreach($fields as $field) {
-			$value = (int) $_POST[$field];
-			if(strlen("$value") !== 3) $this->alertErr("Value for '$field' is invalid");
-			else $this->$field = "0$value";
+			$value = $this->post($field, 'int');
+			if(strlen("$value") !== 3) {
+				$this->alertErr("Value for '$field' is invalid");
+			} else {
+				$this->$field = "0$value";
+			}
 			$values[$field] = $value;
 		}
 
 		// timezone
-		$timezone = (int) $_POST['timezone'];
+		$timezone = $this->post('timezone', 'int');
 		$timezones = $this->timezones();
 		if(isset($timezones[$timezone])) {
 			$value = $timezones[$timezone]; 
@@ -609,7 +612,7 @@ class Installer {
 
 		// http hosts
 		$values['httpHosts'] = array();
-		$httpHosts = trim($_POST['httpHosts']);
+		$httpHosts = $this->post('httpHosts', 'textarea');
 		if(strlen($httpHosts)) {
 			$httpHosts = str_replace(array("'", '"'), '', $httpHosts);
 			$httpHosts = explode("\n", $httpHosts);
@@ -621,13 +624,13 @@ class Installer {
 		}
 		
 		// debug mode
-		$values['debugMode'] = (int) $_POST['debugMode'];
+		$values['debugMode'] = $this->post('debugMode', 'int');
 
 		// db configuration
 		$fields = array('dbUser', 'dbName', 'dbPass', 'dbHost', 'dbPort', 'dbEngine', 'dbCharset');
 		
 		foreach($fields as $field) {
-			$value = get_magic_quotes_gpc() ? stripslashes($_POST[$field]) : $_POST[$field]; 
+			$value = $this->post($field, 'string');
 			$value = substr($value, 0, 255); 
 			if(strpos($value, "'") !== false) $value = str_replace("'", "\\" . "'", $value); // allow for single quotes (i.e. dbPass)
 			$values[$field] = trim($value); 
@@ -694,7 +697,7 @@ class Installer {
 		$query = $database->query("SHOW TABLES");
 		$tables = $query->fetchAll(\PDO::FETCH_COLUMN);
 		$numTables = count($tables);
-		$dbTablesAction = isset($_POST['dbTablesAction']) ? $_POST['dbTablesAction'] : '';
+		$dbTablesAction = $this->post('dbTablesAction', 'string');
 		
 		if($numTables && $dbTablesAction) {
 			if($dbTablesAction === 'remove') {
@@ -783,11 +786,22 @@ class Installer {
 	 */
 	protected function dbSaveConfigFile(array $values) {
 
-		if(self::TEST_MODE) return true; 
+		if(self::TEST_MODE) return true;
+		
+		$file = __FILE__; 
+		$time = time();
+		$host = empty($values['httpHosts']) ? '' : implode(',', $values['httpHosts']);
 
-		$salt = md5(mt_rand() . microtime(true)); 
-
-		$cfg = 	"\n/**" . 
+		if(function_exists('random_bytes')) {
+			$authSalt = sha1(random_bytes(random_int(40, 128)));
+			$tableSalt = sha1(random_int(0, 65535) . "$host$file$time"); 
+		} else {
+			$authSalt = md5(mt_rand() . microtime(true));
+			$tableSalt = md5(mt_rand() . "$host$file$time"); 
+		}
+		
+		$cfg =
+			"\n/**" . 
 			"\n * Installer: Database Configuration" . 
 			"\n * " . 
 			"\n */" . 
@@ -804,11 +818,24 @@ class Installer {
 			"\n" . 
 			"\n/**" . 
 			"\n * Installer: User Authentication Salt " . 
-			"\n * " . 
-			"\n * Must be retained if you migrate your site from one server to another" . 
+			"\n * " .
+			"\n * This value was randomly generated for your system on " . date('Y/m/d') . "." . 
+			"\n * This should be kept as private as a password and never stored in the database." . 
+			"\n * Must be retained if you migrate your site from one server to another." . 
+			"\n * Do not change this value, or user passwords will no longer work." .
 			"\n * " . 
 			"\n */" . 
-			"\n\$config->userAuthSalt = '$salt'; " . 
+			"\n\$config->userAuthSalt = '$authSalt'; " .
+			"\n" .
+			"\n/**" . 
+			"\n * Installer: Table Salt (General Purpose) " .
+			"\n * " .
+			"\n * Use this rather than userAuthSalt when a hashing salt is needed for non user " .
+			"\n * authentication purposes. Like with userAuthSalt, you should never change " . 
+			"\n * this value or it may break internal system comparisons that use it. " . 
+			"\n * " .
+			"\n */" . 
+			"\n\$config->tableSalt = '$tableSalt'; " .
 			"\n" . 
 			"\n/**" . 
 			"\n * Installer: File Permission Configuration" . 
@@ -1109,9 +1136,8 @@ class Installer {
 	protected function getRemoveableItems($getMarkup = false, $removeNow = false) {
 
 		$root = dirname(__FILE__) . '/';
-		$isPost = isset($_POST['remove_items']);
-		$postItems = $isPost ? $_POST['remove_items'] : array();
-		if(!is_array($postItems)) $postItems = array();
+		$isPost = $this->post('remove_items') !== null;
+		$postItems = $this->post('remove_items', 'array');
 		$out = '';
 		
 		$items = array(
@@ -1579,7 +1605,74 @@ class Installer {
 	protected function clear() {
 		echo "\n<div style='clear: both;'></div>";
 	}
-
+	
+	protected function post($key, $sanitizer = '') {
+		
+		$value = isset($_POST[$key]) ? $_POST[$key] : null;
+		
+		if($value === null && empty($sanitizer)) return null;
+		
+		if(version_compare(PHP_VERSION, "5.4.0", "<") && function_exists('get_magic_quotes_gpc')) {
+			if(get_magic_quotes_gpc()) $value = stripslashes($value);
+		}
+		
+		switch($sanitizer) {
+			case 'intSigned':
+				$value = (int) $value;
+				break;
+			case 'int':	
+				$value = (int) $value;
+				if($value < 0) $value = 0;
+				break;
+			case 'text':
+				$value = (string) $value;
+				if(strlen($value)) {
+					$value = str_replace(array("\r", "\n", "\t"), ' ', "$value");
+					$value = trim(strip_tags($value));
+					if(strlen($value) > 255) $value = substr($value, 0, 255);
+				}
+				break;
+			case 'textarea':	
+				$value = (string) $value;
+				if(strlen($value)) {
+					$value = strip_tags($value);
+					$value = str_replace(array("\r\n", "\r"), "\n", $value);
+					if(strlen($value) > 4096) $value = substr($value, 0, 4096);
+					$value = trim($value);
+				}
+				break;
+			case 'string':	
+				$value = trim((string) $value);
+				break;
+			case 'pageName':	
+				$value = strtolower($value); 
+				// no-break: passthrough to 'name' intentional...
+			case 'name':	
+				$value = trim((string) $value);
+				if(strlen($value)) {
+					$value = preg_replace('/[^-._a-z0-9]/', '-', $value);
+					while(strpos($value, '--') !== false) $value = str_replace('--', '-', $value);
+					$value = trim($value, '-');
+				}
+				break;
+			case 'fieldName':
+				$value = trim((string) $value);
+				if(strlen($value)) {
+					$value = preg_replace('/[^_a-zA-Z0-9]/', '_', $value);
+					while(strpos($value, '__') !== false) $value = str_replace('__', '_', $value);
+					$value = trim($value, '_');
+				}
+				break;
+			case 'bool':	
+				$value = $value ? true : false;
+				break;
+			case 'array':	
+				$value = is_array($value) ? $value : array();
+				break;
+		}
+		
+		return $value;
+	}
 
 	/******************************************************************************************************************
 	 * FILE FUNCTIONS

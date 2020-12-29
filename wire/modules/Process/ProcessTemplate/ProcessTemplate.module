@@ -70,7 +70,10 @@ class ProcessTemplate extends Process {
 	public function init() {
 
 		$this->moduleInfo = self::getModuleInfo();
-		$this->headline($this->moduleInfo['title']); 
+		$process = $this->wire('process');
+		if("$process" === "$this") {
+			$this->headline($this->moduleInfo['title']);
+		}
 
 		if(isset($_POST['id'])) {
 			$this->id = (int) $_POST['id']; 
@@ -103,7 +106,7 @@ class ProcessTemplate extends Process {
 				$this->_('Do not include a file extension.'),
 			'invalidTemplateName' => $this->_('Template name does not match required format.'),
 			'nameAlreadyInUse' => $this->_('The name "%s" is already in use'),
-	);
+		);
 
 		if($this->input->urlSegment1) $this->modules->get("JqueryWireTabs"); 
 		
@@ -163,14 +166,16 @@ class ProcessTemplate extends Process {
 
 		$out = $this->getListFilterForm()->render() . "\n<div id='ProcessTemplateList'>\n";
 		$templatesByTag = array();
-		$untaggedLabel = $this->_('Untagged');
-		$hasFilters = $this->session->get('ProcessTemplateFilterField');
+		$untaggedLabel = $this->_('Untagged'); // Tag applied to untagged fields
+		$systemLabel = $this->_x('System', 'tag'); // Tag applied to the group of built-in/system fields
+		$hasFilters = $this->session->getFor($this, 'filterField');
+		$showSystem = $this->session->getFor($this, 'filterSystem');
 		$collapsedTags = array();
 		$caseTags = array(); // indexed by lowercase version of tag
 
 		if(!$hasFilters) foreach($this->templates as $template) {
-			if($this->session->get('ProcessTemplateFilterSystem')) {
-				if($template->flags & Template::flagSystem) $template->tags .= " " . $this->_x('System', 'tag'); // Tag applied to the group of built-in/system fields
+			if($showSystem && ($template->flags & Template::flagSystem)) {
+				$template->tags .= " $systemLabel";
 			}
 			if(empty($template->tags)) {
 				$tag = strtolower($untaggedLabel);
@@ -201,12 +206,14 @@ class ProcessTemplate extends Process {
 			ksort($templatesByTag);
 			foreach($templatesByTag as $tag => $templates) {
 				ksort($templates);
+				$table = $this->getListTable($templates);
+				if(!count($table->rows)) continue;
 				/** @var InputfieldMarkup $f */
 				$f = $this->modules->get('InputfieldMarkup');
 				$f->entityEncodeLabel = false;
 				$f->label = $caseTags[$tag];
 				$f->icon = 'tags';
-				$f->value = $this->getListTable($templates)->render();
+				$f->value = $table->render();
 				if(in_array($tag, $collapsedTags)) $f->collapsed = Inputfield::collapsedYes; 
 				$form->add($f);
 			}
@@ -243,8 +250,8 @@ class ProcessTemplate extends Process {
 		$out .= $button->render();
 
 		if($this->input->get('nosave')) {
-			$this->session->remove('ProcessTemplateFilterSystem');
-			$this->session->remove('ProcessTemplateFilterField');
+			$this->session->removeFor($this, 'filterSystem');
+			$this->session->removeFor($this, 'filterField');
 		}
 
 		return $out;
@@ -285,9 +292,9 @@ class ProcessTemplate extends Process {
 		}	
 		if($input->get('filter_field') !== null) {
 			$filterField = $this->sanitizer->name($input->get('filter_field')); 
-			$this->session->set('ProcessTemplateFilterField', $filterField);
+			$this->session->setFor($this, 'filterField', $filterField);
 		} else {
-			$filterField = $this->session->get('ProcessTemplateFilterField');
+			$filterField = $this->session->getFor($this, 'filterField');
 		}
 		$field->attr('value', $filterField); 
 		$field->collapsed = $filterField ? Inputfield::collapsedNo : Inputfield::collapsedYes; 
@@ -310,16 +317,20 @@ class ProcessTemplate extends Process {
 			$field->icon = 'gear';
 			if($input->get('system') !== null) {
 				$filterSystem  = (int) $input->get('system'); 
-				$this->session->set('ProcessTemplateFilterSystem', $filterSystem);
+				$this->session->setFor($this, 'filterSystem', $filterSystem);
 			} else {
-				$filterSystem = (int) $this->session->get('ProcessTemplateFilterSystem');
+				$filterSystem = (int) $this->session->getFor($this, 'filterSystem');
 			}
 			$field->attr('value', $filterSystem); 
 			$field->collapsed = $filterSystem ? Inputfield::collapsedNo : Inputfield::collapsedYes; 
 			$fieldset->add($field); 
-		} else $filterSystem = 0;
+		} else {
+			$filterSystem = 0;
+		}
 
-		if($filterSystem || $filterField) $fieldset->collapsed = Inputfield::collapsedNo;
+		if($filterSystem || $filterField) {
+			$fieldset->collapsed = Inputfield::collapsedNo;
+		}
 
 		return $form;
 	}
@@ -408,8 +419,8 @@ class ProcessTemplate extends Process {
 				)
 			);
 
-		$filterField = $this->session->get('ProcessTemplateFilterField');
-		$filterSystem = $this->session->get('ProcessTemplateFilterSystem');
+		$filterField = $this->session->getFor($this, 'filterField');
+		$filterSystem = $this->session->getFor($this, 'filterSystem');
 
 		if($template->flags & Template::flagSystem) {
 			if(!$filterSystem && !$filterField) return array();
@@ -448,7 +459,7 @@ class ProcessTemplate extends Process {
 		$row["{$numPages} "] = "$numPagesLink"; // space is required to make it work
 		
 		$mod = $template->modified; 
-		$row[] = $mod > 0 ? "<span style='display: none;'>$mod</span>" . wireRelativeTimeStr($mod) : '';
+		$row[] = $mod > 0 ? "<span style='display: none;'>$mod </span>" . wireRelativeTimeStr($mod) : '';
 		$row[] = $notes;
 		
 		return $row; 
@@ -673,6 +684,7 @@ class ProcessTemplate extends Process {
 		$t->add($this->buildEditFormAccess($template)); 
 		$overrides = $this->buildEditFormAccessOverrides($template);
 		if($overrides) $t->add($overrides);
+		$t->add($this->buildEditFormAccessFiles($template));
 		$form->add($t); 
 
 		$t = $this->wire(new InputfieldWrapper());
@@ -769,6 +781,8 @@ class ProcessTemplate extends Process {
 		$f->attr('id+name', '_fieldgroup_fields_changed');
 		$f->attr('value', '');
 		$t->add($f);
+
+		$t->appendMarkup = "<script>$(document).ready(function() { ProcessTemplateInitFields(); });</script>";
 		
 		if(in_array($template->id, $this->wire('config')->userTemplateIDs)) {
 			/** @var ProcessProfile $profile */
@@ -972,7 +986,7 @@ class ProcessTemplate extends Process {
 		
 		foreach($template->fieldgroup as $field) {
 			$field = $template->fieldgroup->getField($field->id, true); // get in context
-			$attrs = $this->getAsmListAttrs($field); 
+			$attrs = $this->getAsmListAttrs($field, true); 
 			$attrs['selected'] = 'selected';
 			$select->addOption($field->id, $field->name, $attrs);
 		}
@@ -982,7 +996,7 @@ class ProcessTemplate extends Process {
 			if(($field->flags & Field::flagPermanent) && !$this->config->advanced) continue; 
 			$name = $field->name; 
 			if($field->flags & Field::flagSystem) $name .= "*";
-			$attrs = $this->getAsmListAttrs($field); 
+			$attrs = $this->getAsmListAttrs($field, false); 
 			$select->addOption($field->id, $name, $attrs); 
 		}
 	
@@ -993,13 +1007,14 @@ class ProcessTemplate extends Process {
 	 * Get attributes for the asmSelect fields selection
 	 * 
 	 * @param Field $field
+	 * @param bool|null $hasField Does template currently have this field? (or null if column width adjustment not supported)
 	 * @return array
 	 * 
 	 */
-	public function getAsmListAttrs(Field $field) {
+	public function getAsmListAttrs(Field $field, $hasField = null) {
 		
-		$status = '';
 		$desc = '';
+		$fieldType = '';
 		
 		if(!$field->type instanceof FieldtypeFieldsetClose) {
 			$desc = $field->label;
@@ -1011,19 +1026,31 @@ class ProcessTemplate extends Process {
 				$desc .= '…';
 			}
 
-			$status = str_replace('Fieldtype', '', $field->type);
+			$fieldType = "<span class='fieldType'>" . str_replace('Fieldtype', '', $field->type) . "</span>";
 		}
 	
 		$icons = '';
 		if($field->required) $icons .= "<i class='fa fa-asterisk'></i>";
 		if($field->showIf) $icons .= "<i class='fa fa-question-circle'></i>";
-	
-		$status .= $field->columnWidth > 0 ? ' ' . $field->columnWidth . '%' : ' '; 
-		
+		$icons = "<span class='fieldInfo'>$icons</span>";
+
+		$width = $field->columnWidth > 0 && $field->columnWidth <= 100 ? $field->columnWidth : 100;
+		if($hasField) {
+			$widthLabel = $this->wire('sanitizer')->entities1($this->_('Click and drag to adjust field width'));
+			$columnWidth = "<span class='columnWidth ui-priority-secondary' data-was='$width' data-field='$field->id' title='$widthLabel'>$width%</span>";
+		} else {
+			if($hasField === null) {
+				$widthLabel = '';
+			} else {
+				$widthLabel = $this->wire('sanitizer')->entities1($this->_('Save template before adjusting width of new field'));
+			}
+			$columnWidth = "<span class='columnWidth columnWidthOff ui-priority-secondary' title='$widthLabel'>$width%</span>";
+		}
+
 		$attrs = array(
-			'data-status' => $icons . $status,
-			'data-desc' => $this->wire('sanitizer')->entities($desc)
-			);
+			'data-status' => "$icons $fieldType $columnWidth",
+			'data-desc' => $this->wire('sanitizer')->entities($desc),
+		);
 
 		if($field->icon) {
 			$icon = $field->icon;
@@ -1220,6 +1247,7 @@ class ProcessTemplate extends Process {
 		$form = $this->wire(new InputfieldWrapper());
 		/** @var Languages|null $languages */
 		$languages = $this->wire('languages');
+		$advanced = $this->wire()->config->advanced;
 
 		// --------------------
 
@@ -1366,7 +1394,7 @@ class ProcessTemplate extends Process {
 		$field->attr('name', 'noChangeTemplate');
 		$field->label = $this->_("Don't allow pages to change their template?");
 		$field->description = $this->_("When checked, pages using this template will be unable to change to another template."); // noChangeTemplate option, description
-		if($this->wire('config')->advanced) $field->notes = 'API: $template->noChangeTemplate = 1; // ' . $label0; 
+		if($advanced) $field->notes = 'API: $template->noChangeTemplate = 1; // ' . $label0; 
 
 		$field->attr('value', 1);
 		if($template->noChangeTemplate) {
@@ -1383,7 +1411,7 @@ class ProcessTemplate extends Process {
 		$field->attr('name', 'noUnpublish');
 		$field->label = $this->_("Don't allow unpublished pages");
 		$field->description = $this->_("When checked, pages using this template may only exist in a published state and may not be unpublished."); // noUnpublish option, description
-		if($this->wire('config')->advanced) $field->notes = 'API: $template->noUnpublish = 1; // ' . $label0; 
+		if($advanced) $field->notes = 'API: $template->noUnpublish = 1; // ' . $label0; 
 
 		$field->attr('value', 1);
 		if($template->noUnpublish) {
@@ -1400,7 +1428,7 @@ class ProcessTemplate extends Process {
 		$field->attr('name', 'allowChangeUser');
 		$field->label = $this->_("Allow the 'created user' to be changed on pages?");
 		$field->description = $this->_("When checked, pages using this template will have an option to change the 'created by user' (for superusers only). It will also enable the \$page->createdUser or \$page->created_users_id fields to be saved via the API."); // allowChangeUser option, description
-		if($this->wire('config')->advanced) $field->notes = 'API: $template->allowChangeUser = 1; // ' . $label0; 
+		if($advanced) $field->notes = 'API: $template->allowChangeUser = 1; // ' . $label0; 
 
 		$field->attr('value', 1);
 		if($template->allowChangeUser) {
@@ -1417,7 +1445,7 @@ class ProcessTemplate extends Process {
 		$field->attr('name', 'noMove');
 		$field->label = $this->_("Don't allow pages to be moved?");
 		$field->description = $this->_("If you want to prevent pages using this template from being moved (changing parent) then check this box."); // noMove option, description
-		if($this->wire('config')->advanced) $field->notes = 'API: $template->noMove = 1; // ' . $label0;
+		if($advanced) $field->notes = 'API: $template->noMove = 1; // ' . $label0;
 
 		$field->attr('value', 1);
 		if($template->noMove) {
@@ -1435,7 +1463,7 @@ class ProcessTemplate extends Process {
 			$field->attr('name', 'noLang');
 			$field->label = $this->_("Disable multi-language support for this template?");
 			$field->description = $this->_("When checked, pages using this template will only use the default language.");
-			if($this->wire('config')->advanced) $field->notes = 'API: $template->noLang = 1; // ' . $label0; 
+			if($advanced) $field->notes = 'API: $template->noLang = 1; // ' . $label0; 
 
 			$field->attr('value', 1);
 			if($template->noLang) {
@@ -2102,8 +2130,38 @@ class ProcessTemplate extends Process {
 		$field->attr('value', $template->noInherit ? 1 : 0);
 		$fieldset->add($field);
 
-
 		return $form; 
+	}
+
+	/**
+	 * Build the "pagefileSecure" field for the "access" tab
+	 * 
+	 * @param Template $template
+	 * @return InputfieldRadios
+	 * 
+	 */
+	protected function buildEditFormAccessFiles(Template $template) {
+
+		/** @var InputfieldRadios $f */
+		$f = $this->modules->get('InputfieldRadios');
+		$f->attr('id+name', 'pagefileSecure');
+		$f->label = $this->_('Prevent direct access to file assets owned by pages using this template?');
+		$f->icon = 'download';
+		$f->description =
+			$this->_('When direct access to a file in [u]/site/assets/files/[/u] is blocked, ProcessWire can manage delivery of the file, rather than Apache.') . ' ' .
+			$this->_('This enables the file to be access controlled in the same manner as the page that owns it, while still using the original file URL.') . ' ' .
+			$this->_('Note that it takes more overhead to deliver a file this way, so only choose the “Yes always” option if you need it.');
+		$f->notes =
+			$this->_('Always test that the access control is working how you expect by attempting to access the protected file(s) in your browser.') . ' ' .
+			$this->_('Do this for when you expect to have access (logged-in) and when you do not (logged-out).');
+		$f->addOption(0, $this->_('No') . ' ' . 
+			'[span.detail] ' . $this->_('(uses site-wide configuration instead)') . ' [/span]');
+		$f->addOption(1, $this->_('Yes when page is unpublished, in the trash, or not publicly accessible'));
+		$f->addOption(2, $this->_('Yes always, regardless of page status or access control'));
+		$f->val((int) $template->pagefileSecure);
+		if(!$template->pagefileSecure) $f->collapsed = Inputfield::collapsedYes;
+		
+		return $f;
 	}
 
 	/**
@@ -2153,10 +2211,10 @@ class ProcessTemplate extends Process {
 
 			$table->row(array(
 				$label,
-				("<input type='checkbox' id='roles_{$role->id}' class='viewRoles' name='roles[]' value='{$role->id}' " . ($template->roles->has($role) ? $checked : '') . "' />"), 
-				($editable ? ("<input type='checkbox' class='editRoles' name='editRoles[]' value='{$role->id}' " . (in_array($role->id, $template->editRoles) ? $checked : '') . "' />") : $disabled), 
-				($editable ? ("<input type='checkbox' class='createRoles' name='createRoles[]' value='{$role->id}' " . (in_array($role->id, $template->createRoles) ? $checked : '') . "' />") : $disabled),
-				($editable ? ("<input type='checkbox' class='addRoles' name='addRoles[]' value='{$role->id}' " . (in_array($role->id, $template->addRoles) ? $checked : '') . "' />") : $disabled)
+				("<input type='checkbox' id='roles_{$role->id}' class='viewRoles' name='roles[]' value='{$role->id}' " . ($template->roles->has($role) ? $checked : '') . " />"), 
+				($editable ? ("<input type='checkbox' class='editRoles' name='editRoles[]' value='{$role->id}' " . (in_array($role->id, $template->editRoles) ? $checked : '') . " />") : $disabled), 
+				($editable ? ("<input type='checkbox' class='createRoles' name='createRoles[]' value='{$role->id}' " . (in_array($role->id, $template->createRoles) ? $checked : '') . " />") : $disabled),
+				($editable ? ("<input type='checkbox' class='addRoles' name='addRoles[]' value='{$role->id}' " . (in_array($role->id, $template->addRoles) ? $checked : '') . " />") : $disabled)
 				));
 		}
 
@@ -2282,6 +2340,84 @@ class ProcessTemplate extends Process {
 	}
 
 	/**
+	 * Save template/fieldgroup/field property (ajax)
+	 * 
+	 * @throws WireException
+	 * 
+	 */
+	public function ___executeSaveProperty() {
+		
+		$input = $this->wire('input');
+		$result = array('success' => true, 'message' => '', 'value' => '');
+		$property = $input->post('property');
+		$error = '';
+		
+		if(!$this->template) {
+			$error = 'No template specified';
+			
+		} else if(!$property) {
+			$error = 'No property specified';
+			
+		} else if($property === 'columnWidth') {
+			$fieldgroup = $this->template->fieldgroup;
+			$fieldId = (int) $input->post('field');
+			$field = $fieldgroup->getFieldContext($fieldId);
+			if(!$field) $field = $this->wire('fields')->get($fieldId);
+			$columnWidth = (int) $input->post('columnWidth');
+			$oldColumnWidth = $field->columnWidth ? $field->columnWidth : 100;
+
+			if($field && $columnWidth != $oldColumnWidth) {
+				$data = $fieldgroup->getFieldContextArray($field->id);
+				$data['columnWidth'] = $columnWidth;
+				$fieldgroup->setFieldContextArray($field->id, $data);
+				$fieldgroup->saveContext();
+				$result['message'] = "Updated columnWidth from $oldColumnWidth to $columnWidth";
+				$result['value'] = $columnWidth;
+			} else if($field) {
+				$result['message'] = 'No changes';
+				$result['value'] = $columnWidth;
+			} else {
+				$error = 'Field not found';
+			}
+			
+		} else if($property === 'fieldgroup_fields') {
+			$ids = $input->post($property);
+			$fieldgroup = $this->template->fieldgroup;
+		
+			if(is_array($ids)) {
+				foreach($ids as $id) {
+					if(!($id = (int) $id)) continue;
+					$id = abs($id); // deleted items have negative values, but we do not delete here
+					if(!$field = $this->fields->get($id)) continue;
+
+					if(!$fieldgroup->has($field)) {
+						continue; // field will be added when they save
+					} else {
+						$field = $fieldgroup->getFieldContext($field->id);
+						$fieldgroup->append($field);
+					}
+				}
+				$fieldgroup->save();
+				$result['message'] = "Updated fieldgroup field order";
+				$result['value'] = $fieldgroup->implode(',', 'id');
+			} else {
+				$error = "Invalid $property value (array required)";
+			}
+			
+		} else {
+			$error = "Unsupported property requested";
+		}
+		
+		if($error) {
+			$result['success'] = false;
+			$result['message'] = $error;
+		}
+	
+		echo json_encode($result);
+		exit;
+	}
+
+	/**
 	 * Save the template and check to see if a Fieldgroup change was requested
 	 *
 	 */
@@ -2351,6 +2487,9 @@ class ProcessTemplate extends Process {
 		$template->altFilename = basename($form->get('altFilename')->attr('value'), "." . $config->templateExtension);
 		$template->guestSearchable = (int) $form->get('guestSearchable')->attr('value');
 		$template->noInherit = (int) $form->get('noInherit')->attr('value') ? 1 : 0;
+		
+		$pagefileSecurePrev = (int) $template->pagefileSecure;
+		$template->pagefileSecure = (int) $input->post('pagefileSecure');
 
 		$pageLabelField = $form->get('pageLabelField')->attr('value');
 		if(strpos($pageLabelField, '{') !== false && strpos($pageLabelField, '}')) {
@@ -2562,6 +2701,23 @@ class ProcessTemplate extends Process {
 			}
 			unset($cloneTemplateName, $_cloneTemplateName);
 		}
+	
+		// change to the pagefileSecure setting
+		if($pagefileSecurePrev !== $template->pagefileSecure) {
+			$findSelector = "templates_id=$template->id, include=all";
+			$qty = $this->wire()->pages->count($findSelector);
+			if($qty < 1000) {
+				$qty = $template->checkPagefileSecure();
+				$this->message(sprintf($this->_('Renamed %d page file path(s) for change to secure files option'), $qty), Notice::noGroup);
+			} else {
+				$this->warning(
+					sprintf($this->_('Your change to the secure files option will be applied as file/image fields on each of the %d affected pages are accessed.'), $qty) . ' ' . 
+					$this->_('Note that this may take some time. To apply to all now, execute the following API code from a template file:') . ' ' . 
+					"`\$templates->get('$template->name')->checkPagefileSecure();`",
+					Notice::noGroup
+				); 
+			}
+		}
 
 		if(!$redirectUrl) $redirectUrl = "edit?id={$template->id}";
 		$session->redirect($redirectUrl);
@@ -2631,7 +2787,7 @@ class ProcessTemplate extends Process {
 				}
 
 				if($isDeleted) {
-					if(($field->flags & Field::flagGlobal) && !$this->template->noGlobal) {
+					if(!$this->template->getConnectedField() && (($field->flags & Field::flagGlobal) && !$this->template->noGlobal)) {
 						$this->error(sprintf($this->_('Field "%s" may not be removed because it is globally required by all fieldgroups'), $field));
 					} else {
 						$removedFields->add($field);
@@ -2651,9 +2807,14 @@ class ProcessTemplate extends Process {
 					$badFieldsets[$field->name . '_END'] = $field;
 				}
 			}
-			
-			foreach($badFieldsets as $field) {
-				$this->error(sprintf($this->_('Error with placement of fieldset/tab "%s" - please fix and save again'), $field->name));
+		
+			if(count($badFieldsets)) {
+				foreach($badFieldsets as $field) {
+					$this->error(sprintf($this->_('Error with placement of fieldset/tab "%s" - please fix and save again'), $field->name));
+				}
+				/** @var FieldtypeFieldsetOpen $fieldset */
+				$fieldset = $this->wire()->fieldtypes->get('FieldtypeFieldsetOpen');
+				if($fieldset->checkFieldgroupFieldsets($this->template->fieldgroup)) $saveFieldgroup = true;
 			}
 		}
 
@@ -2817,6 +2978,7 @@ class ProcessTemplate extends Process {
 		$removeIds = $this->wire('input')->get('fields'); 
 		if(empty($removeIds)) $this->session->redirect('./');
 		$removeIds = explode(',', $removeIds); 
+		$removeFields = array();
 
 		$fieldgroup = $this->template->fieldgroup; 
 		$this->wire('processHeadline', sprintf($this->_('Remove Fields from Template: %s'), $this->template->name)); 
@@ -2835,9 +2997,20 @@ class ProcessTemplate extends Process {
 		$checkboxes->icon = 'times-circle';
 		$checkboxes->attr('name', 'remove_fields'); 
 		$checkboxes->description = $this->_("You have asked to remove one or more fields from the template. This will result in data associated with the fields below being permanently deleted. If the fields that are removed contain a lot of data, it may take time for this operation to complete after you confirm and submit this form. Please confirm that you understand this and want to delete the field(s) by checking the boxes below.");
-
+		
 		foreach($fieldgroup as $field) {
-			if(!in_array($field->id, $removeIds)) continue; 
+			if(!in_array($field->id, $removeIds)) continue;
+			$removeFields[$field->id] = $field;
+			if($field->type instanceof FieldtypeFieldsetClose) {
+				$opener = $field->type->getFieldsetOpenField($field);
+				if($opener && $fieldgroup->hasField($opener) && !in_array($opener->id, $removeIds)) {
+					unset($removeFields[$field->id]); 
+					$removeFields[$opener->id] = $opener;
+				}
+			}
+		}
+
+		foreach($removeFields as $field) {
 			$checkboxes->addOption($field->id, sprintf($this->_('Remove field "%1$s" from template "%2$s"'), $field->name, $this->template->name)); 
 		}
 

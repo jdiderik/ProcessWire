@@ -9,6 +9,7 @@
  * Accessible Properties
  *
  * @property string $extensions Space separated list of allowed image extensions (default="JPG JPEG GIF PNG")
+ * @property array $okExtensions Array of manually whitelisted extensions, for instance [ 'SVG' ] must be manually whitelisted if allowed. (default=[])
  * @property int|string $maxWidth Max width for uploaded images, larger will be sized down (default='')
  * @property int|string $maxHeight Max height for uploaded images, larger will be sized down (default='')
  * @property float $maxSize Maximum number of megapixels for client-side resize, i.e. 1.7 is ~1600x1000, alt. to maxWidth/maxHeight (default=0).
@@ -27,6 +28,7 @@
  *
  * @property int $gridSize squared size of the admin thumbnails (default=130)
  * @property string $gridMode Default grid mode in admin, one of "grid", "left" or "list" (default="grid")
+ * @property string $focusMode May be 'on', 'off', or 'zoom'
  * @property array $imageSizerOptions Options to pass along to the ImageSizer class. See /wire/config.php $imageSizerOptions for details.
  * 
  * 
@@ -52,7 +54,7 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		return array(
 			'title' => __('Images', __FILE__), // Module Title
 			'summary' => __('One or more image uploads (sortable)', __FILE__), // Module Summary
-			'version' => 122,
+			'version' => 123,
 			'permanent' => true,
 		);
 	}
@@ -201,19 +203,7 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		}
 		
 		if(!$renderValueMode && $this->value instanceof Pageimages) {
-			$page = $this->hasPage;
-			if(!$page || !$page->id) {
-				$process = $this->wire('process');
-				if($process instanceof WirePageEditor) {
-					$page = $process->getPage();
-				} else {
-					$page = new NullPage();
-				}
-			}
-			if(wireClassExists('RepeaterPage')) {
-				/** @var RepeaterPage $page */
-				while(wireInstanceOf($page, 'RepeaterPage')) $page = $page->getForPage();
-			}
+			$page = $this->getRootHasPage();
 			if($page->id && $this->wire('user')->hasPermission('page-edit-images', $page)) {
 				$modules->get('JqueryUI')->use('modal');
 			} else {
@@ -319,8 +309,7 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		if(substr($attrs['name'], -1) != ']') $attrs['name'] .= '[]';
 		$attrStr = $this->getAttributesString($attrs);
 
-		$extensions = $this->extensions;
-		if($this->unzip && !$this->maxFiles) $extensions .= ' zip';
+		$extensions = $this->getAllowedExtensions();
 		$formatExtensions = $this->formatExtensions($extensions);
 		$chooseLabel = $this->labels['choose-file'];
 		
@@ -387,7 +376,7 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		
 		/** @var Pageimage $pagefile */
 		
-		if($pagefile->ext() == 'svg') {
+		if($pagefile->ext() === 'svg') {
 			parent::___fileAdded($pagefile);
 			return;
 		}
@@ -624,6 +613,11 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		$sanitizer = $this->wire('sanitizer');
 		$thumb = $this->getAdminThumb($pagefile, false);
 		$fileStats = str_replace(' ', '&nbsp;', $pagefile->filesizeStr) . ", {$pagefile->width}&times;{$pagefile->height} ";
+		
+		foreach($pagefile->extras() as $name => $extra) {
+			if($extra->exists()) $fileStats .= " &bull; $extra->filesizeStr $name ($extra->savingsPct)";
+		}
+		
 		// $gridSize = $this->gridSize;
 
 		// <div class='gridImage__overflow' style='width: {$gridSize}px; height: {$gridSize}px'>
@@ -666,10 +660,12 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 				</div>
 			";
 
-			// @todo move the following to separate method shared by the renderSingle 
 			$ext = $pagefile->ext();
 			$basename = $pagefile->basename(false);
 			$focus = $pagefile->focus();
+
+			$inputfields = $this->getItemInputfields($pagefile);
+			if($inputfields) $additional .= $inputfields->render();
 				
 			$out .= "
 				<div class='ImageData'>
@@ -773,8 +769,8 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 	
 		if($n) {} // ignore, $n is for hooks
 		$pageID = $pagefile->pagefiles->page->id;
-		$variations = $this->getPagefileVariations($pagefile);
-		$variationCount = count($variations);
+		$variationCount = $pagefile->variations()->count();
+		// if($pagefile->webp()->exists()) $variationCount++;
 		$editUrl = $this->getEditUrl($pagefile, $pageID); 
 		$variationUrl = $this->getVariationUrl($pagefile, $id);
 		$buttonClass = $this->themeSettings['buttonClass'];
@@ -813,6 +809,8 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 	 * 
 	 */
 	protected function renderFileActionSelect(Pagefile $pagefile, $id) {
+
+		if(!$this->useImageEditor) return '';
 	
 		static $hooked = null; 
 		
@@ -1056,7 +1054,8 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		//$field->collapsed = Inputfield::collapsedBlank;
 		$field->columnWidth = 50;
 		$fieldset->add($field); 
-		
+	
+		/** @var InputfieldInteger $field */
 		$field = $this->modules->get('InputfieldInteger');
 		$field->attr('name', 'clientQuality');
 		$field->label = $this->_('Client-side resize quality percent for JPEGs');
@@ -1232,6 +1231,24 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 		return $tooltip;
 	}
 
+	/**
+	 * Get the root "hasPage" being edited
+	 * 
+	 * @return NullPage|Page
+	 * @since 3.0.168
+	 * 
+	 */
+	protected function getRootHasPage() {
+		$page = $this->hasPage;
+		if(!$page || !$page->id) {
+			$process = $this->wire()->process;
+			$page = $process instanceof WirePageEditor ? $process->getPage() : new NullPage();
+		}
+		if(wireClassExists('RepeaterPage')) { /** @var RepeaterPage $page */
+			while(wireInstanceOf($page, 'RepeaterPage')) $page = $page->getForPage();
+		}
+		return $page;
+	}
 
 	/**
 	 * Build data for the tooltip that appears above the thumbnails
@@ -1300,6 +1317,11 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 	
 		/** @var Sanitizer $sanitizer */
 		$sanitizer = $this->wire('sanitizer');
+		$page = $this->getRootHasPage();
+	
+		if($page && $page->id) { 
+			if(!$this->wire()->user->hasPermission('page-edit-images', $page)) $this->useImageEditor = 0;
+		}
 		
 		parent::___processInput($input);
 		
@@ -1378,6 +1400,8 @@ class InputfieldImage extends InputfieldFile implements InputfieldItemList, Inpu
 	 * 
 	 */
 	protected function processFileAction(Pageimage $pagefile, $action, $label) {
+
+		if(!$this->useImageEditor) return null;
 		
 		$success = null;
 		$showSuccess = true; 

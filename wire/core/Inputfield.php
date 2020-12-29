@@ -16,7 +16,7 @@
  * An Inputfield is typically associated with a Fieldtype module when used for ProcessWire fields. 
  * Most Inputfields can also be used on their own. 
  *
- * #pw-order-groups attribute-methods,attribute-properties,settings,traversal,labels,appearance,behavior,other,output,input,states
+ * #pw-order-groups attribute-methods,attribute-properties,settings,traversal,labels,appearance,uikit,behavior,other,output,input,states
  * #pw-use-constants
  * #pw-summary Inputfield is the base class for modules that collect user input for fields.
  * #pw-summary-attribute-properties These properties are retrieved or manipulated via the attribute methods above.
@@ -25,6 +25,7 @@
  * #pw-summary-skipLabel-constants Constants allowed for the `Inputfield::skipLabel` property.
  * #pw-summary-renderValue-constants Options for `Inputfield::renderValueFlags` property, applicable `Inputfield::renderValue()` method call.
  * #pw-summary-module Methods primarily of interest during module development. 
+ * #pw-summary-uikit Settings for Inputfields recognized and used by AdminThemeUikit. 
  * 
  * #pw-body =
  * ~~~~~
@@ -54,6 +55,7 @@
  * @property string $label Primary label text that appears above the input. #pw-group-labels
  * @property string $description Optional description that appears under label to provide more detailed information. #pw-group-labels
  * @property string $notes Optional notes that appear under input area to provide additional notes. #pw-group-labels
+ * @property string $detail Optional text details that appear under notes. @since 3.0.140 #pw-group-labels
  * @property string $icon Optional font-awesome icon name to accompany label (excluding the "fa-") part). #pw-group-labels
  * @property string $requiredLabel Optional custom label to display when missing required value. @since 3.0.98 #pw-group-labels 
  * @property string $head Optional text that appears below label but above description (only used by some Inputfields). #pw-internal
@@ -80,12 +82,21 @@
  * @method string|Inputfield showIf($showIf = null) Get or set showIf selector property via method. @since 3.0.110 #pw-group-appearance
  * @method int|Inputfield columnWidth($columnWidth = null) Get or set columnWidth property via method. @since 3.0.110 #pw-group-appearance
  * @method int|Inputfield skipLabel($skipLabel = null) Get or set the skipLabel constant property via method. @since 3.0.110 #pw-group-appearance
- * 
+ *
+ * UIKIT THEME 
+ * ===========
+ * @property bool|string $themeOffset Offset/margin for Inputfield, one of 's', 'm', or 'l'. #pw-group-uikit
+ * @property string $themeBorder Border style for Inputfield, one of 'none', 'card', 'hide' or 'line'. #pw-group-uikit
+ * @property string $themeInputSize Input size height/font within Inputfield, one of 's', 'm', or 'l'. #pw-group-uikit
+ * @property string $themeInputWidth Input width for text-type inputs, one of 'xs', 's', 'm', 'l', or 'f' (for full-width). #pw-group-uikit
+ * @property string $themeColor Color theme for Inputfield, one of 'primary', 'secondary', 'warning', 'danger', 'success', 'highlight', 'none'. #pw-group-uikit
+ * @property bool $themeBlank Makes <input> element display with no minimal container / no border when true. #pw-group-uikit
  * 
  * SETTINGS & BEHAVIOR
  * ===================
  * @property int|bool $required Set to true (or 1) to make input required, or false (or 0) to make not required (default=0). #pw-group-behavior
  * @property string $requiredIf Optional conditions under which input is required (selector string). #pw-group-behavior
+ * @property int|bool|null $requiredAttr Use HTML5 “required” attribute when used by Inputfield and $required is true? Default=null. #pw-group-behavior
  * @property InputfieldWrapper|null $parent The parent InputfieldWrapper for this Inputfield or null if not set. #pw-internal
  * @property null|bool|Fieldtype $hasFieldtype The Fieldtype using this Inputfield, or boolean false when known not to have a Fieldtype, or null when not known. #pw-group-other
  * @property null|Field $hasField The Field object associated with this Inputfield, or null when not applicable or not known. #pw-group-other
@@ -214,7 +225,7 @@ abstract class Inputfield extends WireData implements Module {
 	const skipLabelFor = true;
 	
 	/**
-	 * Don't use a label header element at all (basically, skip the label)
+	 * Don't show a visible header (likewise, do not show the label)
 	 * #pw-group-skipLabel-constants
 	 *
 	 */
@@ -226,6 +237,14 @@ abstract class Inputfield extends WireData implements Module {
 	 *
 	 */
 	const skipLabelBlank = 4;
+
+	/**
+	 * Do not render any markup for the header/label at all 
+	 * #pw-group-skipLabel-constants
+	 * @since 3.0.139
+	 * 
+	 */
+	const skipLabelMarkup = 8;
 
 	/**
 	 * Plain text: no type of markdown or HTML allowed
@@ -333,24 +352,25 @@ abstract class Inputfield extends WireData implements Module {
 
 		self::$numInstances++; 
 
-		$this->set('label', ''); 	// primary clickable label
-		$this->set('description', ''); 	// descriptive copy, below label
+		$this->set('label', ''); // primary clickable label
+		$this->set('description', ''); // descriptive copy, below label
 		$this->set('icon', ''); // optional icon name to accompany label
-		$this->set('notes', ''); 	// highlighted descriptive copy, below output of input field
-		$this->set('head', ''); 	// below label, above description
-		$this->set('required', 0); 	// set to 1 to make value required for this field
+		$this->set('notes', ''); // highlighted descriptive copy, below output of input field
+		$this->set('detail', ''); // text details that appear below notes
+		$this->set('head', ''); // below label, above description
+		$this->set('required', 0); // set to 1 to make value required for this field
 		$this->set('requiredIf', ''); // optional conditions to make it required
-		$this->set('collapsed', ''); 	// see the collapsed* constants at top of class (use blank string for unset value)
-		$this->set('showIf', ''); 		// optional conditions selector
-		$this->set('columnWidth', ''); 	// percent width of the field. blank or 0 = 100.
+		$this->set('collapsed', ''); // see the collapsed* constants at top of class (use blank string for unset value)
+		$this->set('showIf', ''); // optional conditions selector
+		$this->set('columnWidth', ''); // percent width of the field. blank or 0 = 100.
 		$this->set('skipLabel', self::skipLabelNo); // See the skipLabel constants
 		$this->set('wrapClass', ''); // optional class to apply to the Inputfield wrapper (contains InputfieldHeader + InputfieldContent)
 		$this->set('headerClass', ''); // optional class to apply to InputfieldHeader wrapper
 		$this->set('contentClass', ''); // optional class to apply to InputfieldContent wrapper
 		$this->set('textFormat', self::textFormatBasic); // format applied to description and notes
 		$this->set('renderValueFlags', 0); // see renderValue* constants, applicable to renderValue mode only
-		$this->set('prependMarkup', '');
-		$this->set('appendMarkup', '');
+		$this->set('prependMarkup', ''); // markup to prepend to Inputfield output
+		$this->set('appendMarkup', ''); // markup to append to Inputfield output
 
 		// default ID attribute if no 'id' attribute set
 		$this->defaultID = $this->className() . self::$numInstances; 
@@ -455,12 +475,15 @@ abstract class Inputfield extends WireData implements Module {
 	 *
 	 */ 
 	public function get($key) {	
-		if($key == 'label' && !parent::get('label')) {
+		if($key === 'label') { 
+			$value = parent::get('label');
+			if(strlen($value)) return $value;
 			if($this->skipLabel & self::skipLabelBlank) return '';
 			return $this->attributes['name']; 
 		}
-		if($key == 'attributes') return $this->attributes; 
-		if($key == 'parent') return $this->parent; 
+		if($key === 'name' || $key === 'value' || $key === 'id') return $this->getAttribute($key);
+		if($key === 'attributes') return $this->attributes; 
+		if($key === 'parent') return $this->parent; 
 		if(($value = $this->wire($key)) !== null) return $value; 
 		if(array_key_exists($key, $this->attributes)) return $this->attributes[$key]; 
 		return parent::get($key); 
@@ -868,11 +891,13 @@ abstract class Inputfield extends WireData implements Module {
 	 *
 	 */
 	public function getAttributes() {
-		$attributes = array();
-		foreach($this->attributes as $key => $value) {
-			$attributes[$key] = $value; 
+		$attrs = $this->attributes;
+		if(!isset($attrs['required']) && $this->getSetting('required') && $this->getSetting('requiredAttr')) { 
+			if(!$this->getSetting('showIf') && !$this->getSetting('requiredIf')) {
+				$attrs['required'] = 'required';
+			}
 		}
-		return $attributes; 
+		return $attrs; 
 	}
 
 	/**
@@ -1267,7 +1292,7 @@ abstract class Inputfield extends WireData implements Module {
 	/**
 	 * Process input for this Inputfield directly from the POST (or GET) variables 
 	 * 
-	 * This method should pull the value from the given `$input` ragument, sanitize/validate it, and 
+	 * This method should pull the value from the given `$input` argument, sanitize/validate it, and 
 	 * populate it to the `value` attribute of this Inputfield. 
 	 * 
 	 * Inputfield modules should implement this method if the built-in one here doesn't solve their need.
@@ -1419,6 +1444,7 @@ abstract class Inputfield extends WireData implements Module {
 		$field = $this->modules->get("InputfieldSelect"); 
 		$field->attr('name', 'collapsed'); 
 		$field->label = $this->_('Presentation'); 
+		$field->icon = 'eye-slash';
 		$field->description = $this->_("How should this field be displayed in the editor?");
 		$field->addOption(self::collapsedNo, $this->_('Open'));
 		$field->addOption(self::collapsedNever, $this->_('Open + Cannot be closed'));
@@ -1460,6 +1486,7 @@ abstract class Inputfield extends WireData implements Module {
 		$field->label = sprintf($this->_('Column width (%d%%)'), $value);
 		$field->icon = 'arrows-h';
 		$field->attr('id+name', 'columnWidth'); 
+		$field->addClass('columnWidthInput');
 		$field->attr('type', 'text');
 		$field->attr('maxlength', 4); 
 		$field->attr('size', 4); 
@@ -1482,6 +1509,22 @@ abstract class Inputfield extends WireData implements Module {
 			$field->description = $this->_("If checked, a value will be required for this field.");
 			$field->collapsed = $this->getSetting('required') ? Inputfield::collapsedNo : Inputfield::collapsedYes; 
 			$fields->add($field);
+	
+			$requiredAttr = $this->getSetting('requiredAttr'); 
+			if($requiredAttr !== null) {
+				// Inputfield must have set requiredAttr to some non-null value before this will appear as option in config
+				$field->columnWidth = 50; // required checkbox
+				/** @var InputfieldCheckbox $f */
+				$f = $this->modules->get('InputfieldCheckbox');
+				$f->attr('name', 'requiredAttr');
+				$f->label = $this->_('Also use HTML5 “required” attribute?');
+				$f->showIf = "required=1, showIf='', requiredIf=''";
+				$f->description = $this->_('Use only on fields *always* visible to the user.');
+				$f->icon = 'html5';
+				$f->columnWidth = 50;
+				if($requiredAttr) $f->attr('checked', 'checked');
+				$fields->add($f);
+			}
 		
 			/** @var InputfieldText $field */
 			$field = $this->modules->get('InputfieldText'); 
@@ -1559,6 +1602,7 @@ abstract class Inputfield extends WireData implements Module {
 			'columnWidth', 
 			'required', 
 			'requiredIf', 
+			'requiredAttr',
 			'showIf'
 		);
 	}

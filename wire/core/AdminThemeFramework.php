@@ -61,7 +61,11 @@ abstract class AdminThemeFramework extends AdminTheme {
 	public function __construct() {
 		parent::__construct();
 		$this->set('useAsLogin', false);
+	}
+	
+	public function wired() {
 		$this->sanitizer = $this->wire('sanitizer');
+		parent::wired();
 	}
 
 	/**
@@ -152,7 +156,7 @@ abstract class AdminThemeFramework extends AdminTheme {
 	public function getHeadline() {
 		$headline = $this->wire('processHeadline');
 		if(!$headline) $headline = $this->wire('page')->get('title|name');
-		if($this->wire('languages')) $headline = $this->_($headline);
+		if($headline !== 'en' && $this->wire('languages')) $headline = $this->_($headline);
 		return $this->sanitizer->entities1($headline);
 	}
 
@@ -651,6 +655,7 @@ abstract class AdminThemeFramework extends AdminTheme {
 
 			$text = $notice->text;
 			$allowMarkup = $notice->flags & Notice::allowMarkup;
+			$groupByType = $options['groupByType'] && !($notice->flags & Notice::noGroup) && !($notice instanceof NoticeError); 
 			
 			if($allowMarkup) {
 				// leave $text alone
@@ -695,7 +700,7 @@ abstract class AdminThemeFramework extends AdminTheme {
 				'{text}' => $text,
 			);
 			
-			if($options['groupByType']) {
+			if($groupByType) {
 				if(!isset($noticesArray[$noticeType])) $noticesArray[$noticeType] = array();
 				$noticesArray[$noticeType][] = $replacements;
 			} else {

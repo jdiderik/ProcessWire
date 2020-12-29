@@ -98,13 +98,14 @@ class ProcessPageListerBookmarks extends Wire {
 
 		$publicBookmarks = $this->bookmarks->getPublicBookmarks();
 		$ownedBookmarks = $this->bookmarks->getOwnedBookmarks();
+		$numBookmarks = count($publicBookmarks) + count($ownedBookmarks);
 
 		/** @var Languages $languages */
 		$languages = $this->wire('languages');
 		$languageID = $languages && !$this->user->language->isDefault() ? $this->user->language->id : '';
 
 		$addBookmarkFieldset = $this->buildBookmarkEditForm(0);
-		$addBookmarkFieldset->collapsed = Inputfield::collapsedYes;
+		$addBookmarkFieldset->collapsed = $numBookmarks ? Inputfield::collapsedYes : Inputfield::collapsedNo;
 		$form->add($addBookmarkFieldset);
 
 		$bookmarksByType = array(
@@ -311,8 +312,14 @@ class ProcessPageListerBookmarks extends Wire {
 				$f->label = $this->_x('What pages should this bookmark show?', 'bookmark-editor');
 				$selector = $bookmark['selector'];
 				if($bookmark['sort']) $selector .= ", sort=$bookmark[sort]";
-				if($this->lister->initSelector && strpos($selector, $this->lister->initSelector) !== false) {
-					$selector = str_replace($this->lister->initSelector, '', $selector); // ensure that $selector does not contain initSelector
+				if($this->lister->initSelector) { 
+					$initSelector = $this->lister->initSelector;
+					if(strpos($selector, $initSelector) === false) {
+						$initSelector = trim(preg_replace('![,\s]*\binclude=(all|unpublished|hidden)\b!i', '', $initSelector), ', ');
+					}
+					if(strpos($selector, $initSelector) !== false) {
+						$selector = str_replace($initSelector, '', $selector); // ensure that $selector does not contain initSelector
+					}
 				}
 				if($this->lister->template) $f->initTemplate = $this->lister->template;
 				$default = $this->lister->className() == 'ProcessPageLister';
@@ -344,10 +351,10 @@ class ProcessPageListerBookmarks extends Wire {
 				$f = $this->wire('modules')->get('InputfieldRadios');
 				$f->attr('name', 'bookmark_type');
 				$f->label = $this->_('Bookmark type');
-				$f->addOption(ListerBookmarks::typeOwned, $this->_('Owned') . ' ' .
-					"[span.detail] " . $this->_('(visible to me only)') . " [/span] ");
+				$f->addOption(ListerBookmarks::typeOwned, $this->_('Private'));
 				$f->addOption(ListerBookmarks::typePublic, $this->_('Public'));
 				$f->attr('value', isset($bookmark['type']) ? (int) $bookmark['type'] : ListerBookmarks::typeOwned);
+				$f->optionColumns = 1;
 				$fieldset->add($f);
 			}
 		}
@@ -373,10 +380,12 @@ class ProcessPageListerBookmarks extends Wire {
 		$f->attr('name', 'bookmark_share');
 		$f->label = $this->_('Allow other users to access this bookmark URL?');
 		$f->description = $this->_('If you send the bookmark URL to someone else that is already logged in to the admin, they can view the bookmark if you check this box.');
-		$f->notes = sprintf(
-			$this->_('Shareable bookmark URL: [View](%s)'),
-			$this->page->httpUrl() . str_replace($this->page->url, '', $this->bookmarks->getBookmarkUrl($bookmarkID, $this->user))
-		);
+		if($bookmarkID) {
+			$f->notes = sprintf(
+				$this->_('Shareable bookmark URL: [View](%s)'),
+				$this->page->httpUrl() . str_replace($this->page->url, '', $this->bookmarks->getBookmarkUrl($bookmarkID, $this->user))
+			);
+		}
 		if(empty($bookmark['share'])) {
 			$f->collapsed = Inputfield::collapsedYes;
 		} else {
@@ -480,9 +489,9 @@ class ProcessPageListerBookmarks extends Wire {
 	 */
 	protected function executeSaveBookmark() {
 
-		$input = $this->wire('input');
-		$sanitizer = $this->wire('sanitizer');
-		$languages = $this->wire('languages');
+		$input = $this->wire()->input;
+		$sanitizer = $this->wire()->sanitizer;
+		$languages = $this->wire()->languages;
 
 		$bookmarkID = $this->bookmarks->_bookmarkID($input->post('bookmark_id'));
 		$bookmarkTitle = $input->post->text('bookmark_title');

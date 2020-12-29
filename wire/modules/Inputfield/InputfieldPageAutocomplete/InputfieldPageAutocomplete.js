@@ -78,11 +78,12 @@ var InputfieldPageAutocomplete = {
 		$icon.attr('data-class', $icon.attr('class')); 
 
 		function isAddAllowed() {
-			var allowed = $('#_' + id.replace('Inputfield_', '') + '_add_items').size() > 0;
+			var allowed = $('#_' + id.replace('Inputfield_', '') + '_add_items').length > 0;
 			return allowed;
 		}
 
 		$input.one('focus', function() {
+			InputfieldPageAutocomplete.updateIcons($input.closest('.InputfieldContent'));
 			$input.autocomplete({
 				minLength: 2,
 				source: function(request, response) {
@@ -136,12 +137,12 @@ var InputfieldPageAutocomplete = {
 						$t.closest('.InputfieldPageAutocomplete')
 							.find('.InputfieldPageAutocompleteData').val(ui.item.page_id).change();
 						$t.blur();
-						return false;
 					} else {
 						InputfieldPageAutocomplete.pageSelected($ol, ui.item);
 						$t.val('').focus();
-						return false;
 					}
+					event.stopPropagation();
+					return false;
 				}
 
 			}).blur(function() {
@@ -172,6 +173,7 @@ var InputfieldPageAutocomplete = {
 				$icon.attr('class', $icon.attr('data-class'));
 
 			}).keydown(function(event) {
+				var $addNote;
 				if(event.keyCode == 13) {
 					// prevents enter from submitting the form
 					event.preventDefault();
@@ -191,9 +193,9 @@ var InputfieldPageAutocomplete = {
 							$value.val(page.page_id);
 							$("#_" + id.replace('Inputfield_', '') + '_add_items').val(page.label);
 							$input.addClass('added_item').blur();
-							var $addNote = $note.siblings(".InputfieldPageAutocompleteNoteAdd");
+							$addNote = $note.siblings(".InputfieldPageAutocompleteNoteAdd");
 							if(!$addNote.length) {
-								var $addNote = $("<div class='notes InputfieldPageAutocompleteNote InputfieldPageAutocompleteNoteAdd'></div>");
+								$addNote = $("<div class='notes InputfieldPageAutocompleteNote InputfieldPageAutocompleteNoteAdd'></div>");
 								$note.after($addNote);
 							}
 							$addNote.text($note.attr('data-adding') + ' ' + page.label);
@@ -213,7 +215,7 @@ var InputfieldPageAutocomplete = {
 
 				if(numAdded && noList) {
 					// some other key after an item already added, so remove added item info for potential new one
-					var $addNote = $note.siblings(".InputfieldPageAutocompleteNoteAdd");
+					$addNote = $note.siblings(".InputfieldPageAutocompleteNoteAdd");
 					var $addText = $("#_" + id.replace('Inputfield_', '') + '_add_items');
 					if($addNote.length && $addText.val() != $(this).val()) {
 						// added value has changed
@@ -281,6 +283,9 @@ var InputfieldPageAutocomplete = {
 	 * 
 	 */
 	setIconPosition: function($icon, side) {
+		if($icon.hasClass('PageAutocompleteIconHidden')) {
+			$icon.removeClass('PageAutocompleteIconHidden').show();
+		}
 		var iconHeight = $icon.height();
 		if(iconHeight) {
 			var pHeight = $icon.parent().height();
@@ -293,6 +298,7 @@ var InputfieldPageAutocomplete = {
 			}
 		} else {
 			// icon is not visible (in a tab or collapsed field), we'll leave it alone
+			$icon.hide().addClass('PageAutocompleteIconHidden');
 		}
 	},
 
@@ -326,8 +332,25 @@ var InputfieldPageAutocomplete = {
 		$ol.append($li);
 
 		InputfieldPageAutocomplete.rebuildInput($ol); 
-
+		InputfieldPageAutocomplete.triggerChange($ol);
 	},
+
+	/**
+	 * Trigger change event
+	 * 
+	 * @param $item Any element within the autocomplete Inputfield
+	 * 
+	 */
+	triggerChange: function($item) {
+		var $input;
+		if($item.hasClass('InputfieldPageAutocompleteData')) {
+			$input = $item;
+		} else {
+			if(!$item.hasClass('Inputfield')) $item = $item.closest('.Inputfield');
+			$input = $item.find('.InputfieldPageAutocompleteData')
+		}
+		$input.trigger('change');
+	}, 
 
 	/**
 	 * Rebuild the CSV values present in the hidden input[text] field
@@ -343,8 +366,8 @@ var InputfieldPageAutocomplete = {
 		var max = parseInt($input.attr('data-max'));
 
 		var $children = $ol.children(':not(.itemTemplate)');
-		if(max > 0 && $children.size() > max) { 
-			while($children.size() > max) $children = $children.slice(1); 
+		if(max > 0 && $children.length > max) { 
+			while($children.length > max) $children = $children.slice(1); 
 			$ol.children(':not(.itemTemplate)').replaceWith($children);
 		}
 	
@@ -360,9 +383,20 @@ var InputfieldPageAutocomplete = {
 		$input.val(value);
 
 		var $addItems = $('#_' + name + '_add_items'); 
-		if($addItems.size() > 0) $addItems.val(addValue);
-	}
+		if($addItems.length > 0) $addItems.val(addValue);
+	},
 
+	updateIcons: function($target) {
+		// update positions of icons that previously were not calculable
+		var $icons = $target.find('.InputfieldPageAutocompleteStatus');
+		$icons.each(function() {
+			InputfieldPageAutocomplete.setIconPosition($(this), 'left');
+		});
+		$icons = $target.find('.InputfieldPageAutocompleteRemove');
+		$icons.each(function() {
+			InputfieldPageAutocomplete.setIconPosition($(this), 'right');
+		}); 
+	}
 
 }; 
 
@@ -382,16 +416,14 @@ $(document).ready(function() {
 		var $ol = $li.parent(); 
 		var id = $li.children(".itemValue").text();
 		$li.remove();
-		InputfieldPageAutocomplete.rebuildInput($ol); 
+		InputfieldPageAutocomplete.rebuildInput($ol);
+		InputfieldPageAutocomplete.triggerChange($ol);
 		return false; 
 	});
 	
 	$(document).on('wiretabclick', function(a, $tab) {
 		// update positions of icons that previously were not calculable
-		var $icon = $tab.find('.InputfieldPageAutocompleteStatus');
-		InputfieldPageAutocomplete.setIconPosition($icon, 'left');
-		$icon = $tab.find('.InputfieldPageAutocompleteRemove');
-		InputfieldPageAutocomplete.setIconPosition($icon, 'right');
+		InputfieldPageAutocomplete.updateIcons($tab); 
 	});
 }); 
 

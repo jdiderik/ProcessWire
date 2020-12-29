@@ -114,6 +114,12 @@ class Fields extends WireSaveableItems {
 	protected $tagList = null;
 
 	/**
+	 * @var FieldsTableTools|null
+	 * 
+	 */
+	protected $tableTools = null;
+
+	/**
 	 * Construct
 	 *
 	 */
@@ -153,6 +159,46 @@ class Fields extends WireSaveableItems {
 	 */
 	public function makeBlankItem() {
 		return $this->wire(new Field());
+	}
+
+	/**
+	 * Make an item and populate with given data
+	 *
+	 * @param array $a Associative array of data to populate
+	 * @return Saveable|Wire
+	 * @throws WireException
+	 * @since 3.0.146
+	 *
+	 */
+	public function makeItem(array $a = array()) {
+		
+		if(empty($a['type'])) return parent::makeItem($a);
+		
+		/** @var Fieldtypes $fieldtypes */
+		$fieldtypes = $this->wire('fieldtypes');
+		if(!$fieldtypes) return parent::makeItem($a);
+		
+		/** @var Fieldtype $fieldtype */
+		$fieldtype = $fieldtypes->get($a['type']);
+		if(!$fieldtype) return parent::makeItem($a);
+		
+		$class = $fieldtype->getFieldClass($a);
+		if(empty($class) || $class === 'Field') return parent::makeItem($a);
+		
+		if(strpos($class, "\\") === false) $class = wireClassName($class, true);
+		if(!class_exists($class)) return parent::makeItem($a);
+	
+		/** @var Field $field */
+		$field = new $class();
+		$this->wire($field);
+		
+		foreach($a as $key => $value) {
+			$field->$key = $value;
+		}
+		
+		$field->resetTrackChanges(true);
+		
+		return $field;
 	}
 
 	/**
@@ -220,8 +266,12 @@ class Fields extends WireSaveableItems {
 				$database->exec("RENAME TABLE `$prevTable` TO `tmp_$table`"); // QA
 				$database->exec("RENAME TABLE `tmp_$table` TO `$table`"); // QA
 			}
-			$item->type->renamedField($item, str_replace(Field::tablePrefix, '', $prevTable));
 			$item->prevTable = '';
+		}
+		
+		if(!$isNew && $item->prevName && $item->prevName != $item->name) {
+			$item->type->renamedField($item, $item->prevName);
+			$item->prevName = '';
 		}
 
 		if($item->prevFieldtype && $item->prevFieldtype->name != $item->type->name) {
@@ -378,7 +428,7 @@ class Fields extends WireSaveableItems {
 
 		$field_id = (int) $field->id;
 		$fieldgroup_id = (int) $fieldgroup->id; 
-		$database = $this->wire('database');
+		$database = $this->wire()->database;
 
 		$newValues = $field->getArray();
 		$oldValues = $fieldOriginal->getArray();
@@ -456,13 +506,12 @@ class Fields extends WireSaveableItems {
 		// if there is something in data, then JSON encode it. If it's empty then make it null.
 		$data = count($data) ? wireEncodeJSON($data, true) : null;
 
-		if(is_null($data)) {
-			$data = 'NULL';
+		$query = $database->prepare('UPDATE fieldgroups_fields SET data=:data WHERE fields_id=:field_id AND fieldgroups_id=:fieldgroup_id');
+		if(empty($data)) {
+			$query->bindValue(':data', null, \PDO::PARAM_NULL); 
 		} else {
-			$data = "'" . $this->wire('database')->escapeStr($data) . "'";
+			$query->bindValue(':data', $data, \PDO::PARAM_STR); 
 		}
-		
-		$query = $database->prepare("UPDATE fieldgroups_fields SET data=$data WHERE fields_id=:field_id AND fieldgroups_id=:fieldgroup_id"); // QA
 		$query->bindValue(':field_id', $field_id, \PDO::PARAM_INT);
 		$query->bindValue(':fieldgroup_id', $fieldgroup_id, \PDO::PARAM_INT); 
 		$result = $query->execute();
@@ -1046,6 +1095,47 @@ class Fields extends WireSaveableItems {
 	 * 
 	 */
 	public function ___changeTypeReady(Saveable $item, Fieldtype $fromType, Fieldtype $toType) { }
+
+	/**
+	 * Get Fieldtypes compatible (for type change) with given Field
+	 * 
+	 * #pw-internal
+	 *
+	 * @param Field $field
+	 * @return array Array of Fieldtype objects indexed by class name
+	 * @since 3.0.140
+	 *
+	 */
+	public function getCompatibleFieldtypes(Field $field) {
+		$fieldtype = $field->type;
+		if($fieldtype) {
+			// ask fieldtype what is compatible
+			$fieldtypes = $fieldtype->getCompatibleFieldtypes($field);
+			if(!$fieldtypes || !$fieldtypes instanceof WireArray) {
+				$fieldtypes = $this->wire(new Fieldtypes());
+			}
+			// ensure original is present
+			$fieldtypes->prepend($fieldtype);
+		} else {
+			// allow all
+			$fieldtypes = $this->wire('fieldtypes');
+		}
+		return $fieldtypes;
+	}
+
+	/**
+	 * Get FieldsIndexTools instance
+	 * 
+	 * #pw-internal
+	 * 
+	 * @return FieldsTableTools
+	 * @since 3.0.150
+	 * 
+	 */
+	public function tableTools() {
+		if($this->tableTools === null) $this->tableTools = $this->wire(new FieldsTableTools());
+		return $this->tableTools;
+	}
 
 }
 

@@ -12,6 +12,7 @@ var InputfieldPageListSelectMultiple = {
 		$t.ProcessPageList({
 			mode: 'select',
 			rootPageID: $t.attr('data-root'),
+			showRootPage: true, 
 			selectShowPageHeader: false,
 			selectSelectHref: $t.attr('data-href'),
 			selectStartLabel: $t.attr('data-start'),
@@ -98,9 +99,20 @@ var InputfieldPageListSelectMultiple = {
 		id = id.substring(0, id.lastIndexOf('_')); 
 		var $input = $('#' + id);
 		var value = '';
+		var selected = {};
 		$ol.children(':not(.itemTemplate)').each(function() {
-			if(value.length > 0) value += ',';
-			value += $(this).children('.itemValue').text();
+			var $li = $(this);
+			var v = $li.children('.itemValue').text();
+			if(typeof selected[v] != "undefined") {
+				// item already in list
+				if(jQuery.ui) selected[v].effect('highlight', 1000);
+				$li.remove();
+			} else {
+				// add new item to list
+				selected[v] = $li;
+				if(value.length > 0) value += ',';
+				value += v;
+			}
 		}); 
 		$input.val(value);
 		$input.change();

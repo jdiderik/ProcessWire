@@ -5,12 +5,12 @@
  * 
  * @method string render()
  * 
- * @property array $headerRow
- * @property array $footerRow
- * @property array $rows
- * @property array $rowClasses
- * @property array $rowAttrs
- * @property array $actions
+ * @property-read array $headerRow
+ * @property-read array $footerRow
+ * @property-read array $rows
+ * @property-read array $rowClasses
+ * @property-read array $rowAttrs
+ * @property-read array $actions
  * @property bool $encodeEntities
  * @property bool $sortable
  * @property bool $resizable
@@ -111,9 +111,26 @@ class MarkupAdminDataTable extends ModuleJS {
 	}
 
 	/**
+	 * Get property
+	 * 
+	 * @param string $key
+	 * @return mixed|null
+	 * 
+	 */
+	public function get($key) {
+		if($key === 'rows' || $key === 'headerRow' || $key === 'footerRow') return $this->$key;
+		if($key === 'rowClasses' || $key === 'rowAttrs' || $key === 'actions') return $this->$key;
+		return parent::get($key);
+	}
+
+	/**
 	 * Set the header row for the table
 	 * 
-	 * @param array $a Array of header row labels (strings)
+	 * Given $a array may be either array of labels (strings) or any of the array items may
+	 * be an array, in which case index 0 is the label and index 1 is a class attribute to use 
+	 * for the th element.
+	 * 
+	 * @param array $a Array of header row labels 
 	 * @return $this
 	 * 
 	 */

@@ -3,7 +3,7 @@
 /**
  * Serves as a multi-language value placeholder for field values that contain a value in more than one language. 
  *
- * ProcessWire 3.x, Copyright 2016 by Ryan Cramer
+ * ProcessWire 3.x, Copyright 2019 by Ryan Cramer
  * https://processwire.com
  *
  */
@@ -152,7 +152,7 @@ class LanguagesPageFieldValue extends Wire implements LanguagesValueInterface, \
 	}
 
 	/**
-	 * Given an Inputfield with multi language values, this grabs and populates the language values from it
+	 * Grab language values from Inputfield and populate to this object
 	 *
 	 * @param Inputfield $inputfield
 	 *
@@ -166,6 +166,20 @@ class LanguagesPageFieldValue extends Wire implements LanguagesValueInterface, \
 				$key = 'value' . $language->id; 
 			}
 			$this->setLanguageValue($language->id, $inputfield->$key); 
+		}
+	}
+
+	/**
+	 * Populate language values from this object to given Inputfield
+	 *
+	 * @param Inputfield $inputfield
+	 * @since 3.0.170
+	 *
+	 */
+	public function setToInputfield(Inputfield $inputfield) {
+		foreach($this->wire()->languages as $language) {
+			$key = $language->isDefault ? "value" : "value$language->id";
+			$inputfield->set($key, $this->getLanguageValue($language->id));
 		}
 	}
 
@@ -192,18 +206,54 @@ class LanguagesPageFieldValue extends Wire implements LanguagesValueInterface, \
 	}
 
 	/**
+	 * Get non-empty value in this order: current lang, default lang, other lang, failValue
+	 * 
+	 * @param string $failValue Value to use if we cannot find a non-empty value
+	 * @return string 
+	 * @since 3.0.147
+	 * 
+	 */
+	public function getNonEmptyValue($failValue = '') {
+		
+		$value = (string) $this;
+		if(strlen($value)) return $value; 
+		
+		$value = (string) $this->getDefaultValue();
+		if(strlen($value)) return $value;
+		
+		foreach($this->wire('languages') as $language) {
+			$value = $this->getLanguageValue($language->id);
+			if(strlen($value)) break;
+		}
+		
+		if(!strlen($value)) $value = $failValue;
+		
+		return $value;
+	}
+
+	/**
 	 * The string value is the value in the current user's language
 	 *
 	 */
 	public function __toString() {
-		return $this->wire('hooks')->isHooked('LanguagesPageFieldValue::getStringValue()') ? $this->__call('getStringValue', array()) : $this->___getStringValue();
+		if($this->wire('hooks')->isHooked('LanguagesPageFieldValue::getStringValue()')) {
+			return $this->__call('getStringValue', array());
+		} else {
+			return $this->___getStringValue();
+		}	
 	}
 
 	protected function ___getStringValue() {
-		$language = $this->wire('user')->language; 	
+		
+		$template = $this->page->template;
+		$language = $this->wire()->user->language; 	
 		$defaultValue = (string) $this->data[$this->defaultLanguagePageID];
-		if(!$language || !$language->id || $language->isDefault()) return $defaultValue; 
+		
+		if(!$language || !$language->id || $language->isDefault()) return $defaultValue;
+		if($template && $template->noLang) return $defaultValue;
+
 		$languageValue = (string) (empty($this->data[$language->id]) ? '' : $this->data[$language->id]); 
+		
 		if(!strlen($languageValue)) {
 			// value is blank
 			if($this->field) { 
@@ -213,6 +263,7 @@ class LanguagesPageFieldValue extends Wire implements LanguagesValueInterface, \
 				}
 			}
 		}
+		
 		return $languageValue; 
 	}
 
@@ -245,7 +296,7 @@ class LanguagesPageFieldValue extends Wire implements LanguagesValueInterface, \
 	 *
 	 * Fulfills \IteratorAggregate interface.
 	 *
-	 * @return ArrayObject
+	 * @return \ArrayObject
 	 *
 	 */
 	public function getIterator() {

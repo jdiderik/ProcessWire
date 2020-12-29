@@ -140,11 +140,12 @@
  * 
  * ~~~~~
  * {
- *   title: 'Your Module title',
- *   version: 1,
- *   // and so on
+ *   "title": "Your Module Title",
+ *   "version": 1
  * }
  * ~~~~~
+ * Note: The example JSON above just shows "title" and "version", but you would
+ * likely add more than that as needed, like shown in the static version above. 
  * 
  * -----------------------------------------------------------------
  *
@@ -331,7 +332,7 @@
  * to support the module from one version to another. The previous known version ($fromVersion) and new
  * version ($toVersion) are provided as arguments.
  * 
- * If implemented, uninstall() methods typically are defined hookable as `public function ___upgrade(...)`. 
+ * If implemented, upgrade() methods typically are defined hookable as `public function ___upgrade(...)`. 
  * If the upgrade cannot proceed for some reason, this method should throw a `WireException`. 
  * 
  * 

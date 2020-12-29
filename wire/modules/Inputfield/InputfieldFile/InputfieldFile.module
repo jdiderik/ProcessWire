@@ -4,6 +4,7 @@
  * An Inputfield for handling file uploads
  *
  * @property string $extensions Allowed file extensions, space separated
+ * @property array $okExtensions File extensions that are whitelisted if any in $extensions are problematic. (3.0.167+)
  * @property int $maxFiles Maximum number of files allowed
  * @property int $maxFilesize Maximum file size
  * @property bool $useTags Whether or not tags are enabled
@@ -30,6 +31,7 @@
  * @method void processInputAddFile($filename)
  * @method void processInputDeleteFile(Pagefile $pagefile)
  * @method bool processInputFile(WireInputData $input, Pagefile $pagefile, $n)
+ * @method bool processItemInputfields(Pagefile $pagefile, InputfieldWrapper $inputfields, $id, WireInputData $input)
  *
  */
 class InputfieldFile extends Inputfield implements InputfieldItemList, InputfieldHasSortableValue {
@@ -38,7 +40,7 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		return array(
 			'title' => __('Files', __FILE__), // Module Title
 			'summary' => __('One or more file uploads (sortable)', __FILE__), // Module Summary
-			'version' => 125,
+			'version' => 126,
 			'permanent' => true, 
 			);
 	}
@@ -108,6 +110,22 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 	 * 
 	 */
 	protected $labels = array();
+	
+	/**
+	 * Cached value of Fieldgroup used for Pagefile custom fields, as used by getItemInputfields() method
+	 *
+	 * @var Fieldgroup|null|bool Null when not yet known, false when known not applicable, Fieldgroup when known and in use
+	 *
+	 */
+	protected $itemFieldgroup = null;
+
+	/**
+	 * Cached result from FieldtypeFile::getValidFileExtension()
+	 * 
+	 * @var array
+	 * 
+	 */
+	protected $extensionsInfo = array();
 
 	/**
 	 * Initialize the InputfieldFile
@@ -119,6 +137,7 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		// note: these two fields originate from FieldtypeFile. 
 		// Initializing them here ensures this Inputfield has the values set automatically.
 		$this->set('extensions', '');
+		$this->set('okExtensions', array()); // manually whitelisted problematic extensions
 		$this->set('maxFiles', 0); 
 		$this->set('maxFilesize', 0); 
 		$this->set('useTags', 0);
@@ -477,17 +496,21 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 				"<input type='checkbox' name='delete_$id' value='1' title='$deleteLabel' />" . 
 				"<i class='fa fa-fw fa-trash'></i></label>";
 		
-		$out .= 
-			"</p>" . 
-			"<div class='InputfieldFileData description ui-widget-content'>" . 
-			$this->renderItemDescriptionField($pagefile, $id, $n);
+		$description = $this->renderItemDescriptionField($pagefile, $id, $n);
+		$class = 'InputfieldFileData ';
+		$class .= $description ? 'description ui-widget-content' : 'InputfieldFileFields';
 		
-		if(!$this->renderValueMode) $out .= 
-			"<input class='InputfieldFileSort' type='text' name='sort_$id' value='$n' />";
-		
-		$out .= 
-			"</div>";
+		$out .= "</p><div class='$class'>" . $description;
 
+		$inputfields = $this->getItemInputfields($pagefile);
+		if($inputfields) $out .= $inputfields->render();
+		
+		if(!$this->renderValueMode) {
+			$out .= "<input class='InputfieldFileSort' type='text' name='sort_$id' value='$n' />";
+		}
+		
+		$out .= "</div>";
+		
 		return $out; 
 	}
 
@@ -575,9 +598,8 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		unset($attrs['value']); 
 		if(substr($attrs['name'], -1) != ']') $attrs['name'] .= '[]';
 
-		$extensions = $this->extensions;
-		if($this->unzip && !$this->maxFiles) $extensions .= ' zip';
-		$formatExtensions = $this->formatExtensions($extensions);
+		$extensions = $this->getAllowedExtensions();
+		$formatExtensions = $this->formatExtensions();
 		$chooseLabel = $this->labels['choose-file'];
 		$dragDropLabel = $this->labels['drag-drop'];
 		$attrStr = $this->getAttributesString($attrs);
@@ -622,7 +644,19 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		return $out; 
 	}
 
+	/**
+	 * Render ready
+	 * 
+	 * @param Inputfield|null $parent
+	 * @param bool $renderValueMode
+	 * @return bool
+	 * 
+	 */
 	public function renderReady(Inputfield $parent = null, $renderValueMode = false) {
+		
+		/** @var Config $config */
+		$config = $this->wire('config');
+		
 		$this->addClass('InputfieldNoFocus', 'wrapClass');
 		if(!$renderValueMode) $this->addClass('InputfieldHasUpload', 'wrapClass');
 		
@@ -631,7 +665,6 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 			$this->addClass('InputfieldFileHasTags', 'wrapClass');
 			if($this->useTags >= FieldtypeFile::useTagsPredefined && $this->hasField) {
 				// predefined tags
-				$config = $this->wire('config');
 				$fieldName = $this->hasField->name;
 				$jsName = "InputfieldFileTags_$fieldName";
 				$allowUserTags = $this->useTags & FieldtypeFile::useTagsNormal;
@@ -661,9 +694,26 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 			}
 		}
 		
+		$data = $config->js('InputfieldFile');
+		if(!is_array($data)) $data = array();
+		if(empty($data['labels'])) $data['labels'] = array();
+		if(empty($data['labels']['bad-ext'])) {
+			$data['labels']['bad-ext'] = $this->_('Unsupported file extension, please use only: EXTENSIONS');
+			$data['labels']['too-big'] = $this->_('File is too big - maximum allowed size is MAX_KB kb');
+			$config->js('InputfieldFile', $data); 
+		}
+		
+		$this->getItemInputfields(); // custom fields ready
+		
 		return parent::renderReady($parent, $renderValueMode); 
 	}
 
+	/**
+	 * Render Inputfield input
+	 * 
+	 * @return string
+	 * 
+	 */
 	public function ___render() {
 		if(!$this->extensions) $this->error($this->_('No file extensions are defined for this field.')); 
 		$numItems = wireCount($this->value);
@@ -677,7 +727,13 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		}
 		return $this->renderList($this->value) . $this->renderUpload($this->value);
 	}
-	
+
+	/**
+	 * Render Inputfield value
+	 * 
+	 * @return string
+	 * 
+	 */
 	public function ___renderValue() {
 		$this->renderValueMode = true; 
 		$out = $this->render();
@@ -685,17 +741,25 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		return $out; 
 	}
 
+	/**
+	 * File added hook
+	 * 
+	 * @param Pagefile $pagefile
+	 * @throws WireException
+	 * 
+	 */
 	protected function ___fileAdded(Pagefile $pagefile) {
 		if($this->noUpload) return;
+		$sanitizer = $this->wire()->sanitizer;
 		
-		$isValid = $this->wire('sanitizer')->validateFile($pagefile->filename(), array(
+		$isValid = $sanitizer->validateFile($pagefile->filename(), array(
 			'pagefile' => $pagefile
 		));
 		
 		if($isValid === false) {
-			$errors = $this->wire('sanitizer')->errors('clear array');
+			$errors = $sanitizer->errors('clear array');
 			throw new WireException(
-				$this->_('File failed validation') . 
+				"$pagefile->basename - " . $this->_('File failed validation') . 
 				(count($errors) ? ": " . implode(', ', $errors) : "")
 			);
 		} else if($isValid === null) {
@@ -713,8 +777,19 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		} else {
 			$this->message($message); 
 		}
+		
+		$pagefile->createdUser = $this->wire('user');
+		$pagefile->modifiedUser = $this->wire('user');
 	}
-	
+
+	/**
+	 * Get markup for added file
+	 * 
+	 * @param Pagefile $pagefile
+	 * @param int $n
+	 * @return string
+	 * 
+	 */
 	protected function fileAddedGetMarkup(Pagefile $pagefile, $n) {
 		return $this->renderItemWrap($this->renderItem($pagefile, $this->pagefileId($pagefile), $n));	
 	}
@@ -748,6 +823,8 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 	}
 
 	/**
+	 * Process input to add a file
+	 * 
 	 * @param string $filename
 	 * @throws WireException
 	 * 
@@ -822,6 +899,12 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		}
 	}
 
+	/**
+	 * Process input to delete a Pagefile item
+	 * 
+	 * @param Pagefile $pagefile
+	 * 
+	 */
 	protected function ___processInputDeleteFile(Pagefile $pagefile) {
 		$fileLabel = $this->wire('config')->debug ? $pagefile->url() : $pagefile->name;
 		$this->message($this->_("Deleted file:") . " $fileLabel"); // Label that precedes a deleted filename
@@ -829,8 +912,19 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		$this->trackChange('value');
 	}
 
+	/**
+	 * Process input for one Pagefile
+	 * 
+	 * @param WireInputData $input
+	 * @param Pagefile $pagefile
+	 * @param int $n
+	 * @return bool
+	 * 
+	 */
 	protected function ___processInputFile(WireInputData $input, Pagefile $pagefile, $n) {
-		
+
+		$saveFields = false; // allow custom Inputfields to be saved?
+		$changed = false; // are there any changes to this file?
 		$id = $this->name . '_' . $pagefile->hash;
 	
 		if($this->uploadOnlyMode) {
@@ -839,8 +933,6 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 			if($input->$key === null) return false;
 		}
 		
-		$changed = false; 
-	
 		// replace (currently only used by InputfieldImage)
 		$key = "replace_$id";
 		$replace = $input->$key;
@@ -916,9 +1008,16 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 			$sort = $input->$key;
 			if($sort !== null) {
 				$sort = (int) $sort; 
-				$pagefile->sort = $sort;
+				$pagefile->set('sort', $sort);
 				if($n !== $sort) $changed = true;
+				$saveFields = true;
 			}
+		}
+		
+		if($saveFields) {
+			// save custom Inputfields
+			$inputfields = $this->getItemInputfields($pagefile);
+			if($inputfields && $this->processItemInputfields($pagefile, $inputfields, $id, $input)) $changed = true;
 		}
 
 		if(isset($input['delete_' . $id])) {
@@ -928,6 +1027,8 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		} else if(!$this->isAjax && !$this->overwrite && $pagefile->isTemp() && $sort !== null) {
 			// if page saved with temporary items when not ajax, those temporary items become non-temp
 			$pagefile->isTemp(false);
+			// @todo should the next statement instead be this below?
+			// if($this->maxFiles > 0) while(count($this->value) > $this->>maxFiles) { ... } ?
 			if($this->maxFiles == 1) while(count($this->value) > 1) {
 				$item = $this->value->first();
 				$this->value->remove($item);
@@ -938,6 +1039,52 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 		return $changed; 
 	}
 
+	/**
+	 * Process custom Inputfields for Pagefile item
+	 * 
+	 * @param Pagefile $pagefile
+	 * @param InputfieldWrapper $inputfields
+	 * @param string $id Pagefile ID string
+	 * @param WireInputData $input
+	 * @return bool True if changes detected, false if not
+	 * @since 3.0.142
+	 * 
+	 */
+	protected function ___processItemInputfields(Pagefile $pagefile, InputfieldWrapper $inputfields, $id, WireInputData $input) {
+		
+		$changed = false;
+		$inputfields->resetTrackChanges(true);
+		$inputfields->processInput($input);
+		
+		foreach($inputfields->getAll() as $f) {
+			/** @var Inputfield $f */
+			foreach($f->getErrors(true) as $error) {
+				$f->error("$this->label ($pagefile->name): $error");
+			}
+			if(!$f->isChanged() && !$pagefile->isTemp()) {
+				continue;
+			}
+			$name = str_replace("_$id", '', $f->attr('name'));
+			if($f->getSetting('useLanguages')) {
+				$value = $pagefile->getFieldValue($name);
+				if(is_object($value)) $value->setFromInputfield($f);
+			} else {
+				$value = $f->val();
+			}
+			$pagefile->setFieldValue($name, $value, true);
+			$changed = true;
+		}
+		
+		return $changed;
+	}
+
+	/**
+	 * Process input
+	 * 
+	 * @param WireInputData $input
+	 * @return self
+	 * 
+	 */
 	public function ___processInput(WireInputData $input) {
 		
 		if(is_null($this->value)) $this->value = $this->wire(new Pagefiles($this->wire('page')));
@@ -975,7 +1122,7 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 					$ul->setExtractArchives(true); 
 				}
 
-				$ul->setValidExtensions(explode(' ', trim($this->extensions))); 
+				$ul->setValidExtensions($this->getAllowedExtensions(true));
 
 				foreach($ul->execute() as $filename) {
 					$this->processInputAddFile($filename); 
@@ -1080,18 +1227,156 @@ class InputfieldFile extends Inputfield implements InputfieldItemList, Inputfiel
 	 *
 	 */
 	protected function allowCollapsedItems() {
-		return $this->descriptionRows == 0 && !$this->useTags && !$this->noCollapseItem;
+		$allow = $this->descriptionRows == 0 && !$this->useTags && !$this->noCollapseItem;
+		if($allow && $this->hasField) {
+			/** @var FieldtypeFile $fieldtype */
+			$fieldtype = $this->hasField->type;
+			if($fieldtype->getFieldsTemplate($this->hasField)) $allow = false;
+		}
+		return $allow;
 	}
 
 	/**
 	 * Format list of file extensions for output with upload field
 	 *
-	 * @param string $extensions
+	 * @param array|string $extensions
 	 * @return string
 	 *
 	 */
-	protected function formatExtensions($extensions) {
-		return $this->wire('sanitizer')->entities(str_replace(' ', ', ', trim($extensions)));
+	protected function formatExtensions($extensions = '') {
+		$sanitizer = $this->wire()->sanitizer;
+		$badExtensions = array();
+		if(empty($extensions)) {
+			$info = $this->getExtensionsInfo();
+			$extensions = $info['valid'];
+			$badExtensions = $info['invalid'];
+		} else if(is_string($extensions)) {
+			while(strpos($extensions, '  ') !== false) $extensions = str_replace('  ', ' ', $extensions);
+			$extensions = explode(' ', trim($extensions)); 
+		}
+		$out = $sanitizer->entities(implode(', ', $extensions));
+		if(count($badExtensions)) {
+			if($out) $out .= ', ';
+			$out .= '<s>' . $sanitizer->entities(implode(', ', $badExtensions)) . '</s>'; 
+		}
+		return $out;
+	}
+	
+	/**
+	 * Get allowed file extensions
+	 * 
+	 * @param bool $getArray
+	 * @return array|string
+	 * @since 3.0.167
+	 * 
+	 */
+	protected function getAllowedExtensions($getArray = false) {
+		$info = $this->getExtensionsInfo();
+		$extensions = $info['valid'];
+		if($this->unzip && !$this->maxFiles) if(!in_array('zip', $extensions)) $extensions[] = 'zip';
+		return $getArray ? $extensions : implode(' ', $extensions);
+	}
+
+	/**
+	 * Get extensions info (see FieldtypeFile::getValidFileExtensions)
+	 * 
+	 * @return array
+	 * @since 3.0.167
+	 * 
+	 */
+	protected function getExtensionsInfo() {
+		if(empty($this->extensionsInfo)) {
+			$this->extensionsInfo = $this->wire()->fieldtypes->FieldtypeFile->getValidFileExtensions($this);
+		}
+		return $this->extensionsInfo;
+	}
+
+	/**
+	 * Get custom Inputfields for editing given Pagefile 
+	 * 
+	 * @param Pagefile|null $item Specify Pagefile item, or omit to prepare for render ready
+	 * @return bool|InputfieldWrapper
+	 * @since 3.0.142
+	 * 
+	 */
+	public function getItemInputfields(Pagefile $item = null) {
+	
+		/** @var Pagefiles $pagefiles */
+		$value = $this->val();
+		$pagefiles = $value instanceof Pagefile ? $value->pagefiles : $value;
+		
+		if(!$pagefiles instanceof Pagefiles) {
+			// no value present on this Inputfield
+			return false;
+		}
+		
+		if($this->itemFieldgroup === false) {
+			// item fieldgroup already determined not in use
+			return false;
+		}
+	
+		if($this->itemFieldgroup === null) {
+			// item fieldgroup not yet determined
+			$this->itemFieldgroup = false;
+			$template = $pagefiles->getFieldsTemplate();
+			if(!$template) return false;
+			$this->itemFieldgroup = $template->fieldgroup;
+		}
+
+		/** @var Page $page */
+		$page = $pagefiles->getFieldsPage();
+		$id = $item ? ('_' . $this->pagefileId($item)) : '';
+		
+		$inputfields = $this->itemFieldgroup->getPageInputfields($page, $id, '', false); 
+		if(!$inputfields) return false;
+		
+		/** @var Languages|null $languages */
+		$languages = $this->wire('languages');
+
+		foreach($inputfields->getAll() as $f) {
+			
+			if(!$item) {
+				// prepare inputfields for render rather than populating them
+				$f->renderReady();
+				continue;
+			}
+			
+			/** @var Inputfield $f */
+			$name = str_replace($id, '', $f->name);
+			$value = $item ? $item->getFieldValue($name) : null; 
+			if($value === null) continue;
+			
+			if($languages && $f->getSetting('useLanguages') && $value instanceof LanguagesValueInterface) {
+				foreach($languages as $language) {
+					$v = $value->getLanguageValue($language->id);
+					if($language->isDefault()) $f->val($v);
+					$f->set("value$language->id", $v);
+				}
+			} else if($f instanceof InputfieldCheckbox) {
+				if($value) $f->attr('checked', 'checked'); 
+			} else {
+				$f->val($value);
+			}
+			
+			if($f->className() === 'InputfieldCKEditor') {
+				// CKE does not like being placed in file/image fields.
+				// I'm sure it's possible, but needs more work and debugging, so it's disabled for now.
+				$allow = false;
+			} else {
+				$allow = true;
+			}
+			
+			if(!$allow) {
+				$inputfields->remove($f);
+				$this->prependMarkup =
+					"<p class='ui-state-error-text'>" .
+					sprintf($this->_('Field “%1$s” type “%2$s” is not supported in field “%3$s”'), $f->label, $f->className(), $this->label) .
+					'</p>';
+				$f->getParent()->remove($f);
+			}
+		}
+		
+		return $inputfields;
 	}
 
 	/**

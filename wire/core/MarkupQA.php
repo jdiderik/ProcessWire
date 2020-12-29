@@ -547,7 +547,7 @@ class MarkupQA extends Wire {
 					// linked page is in trash, we won't update it but we'll produce a warning
 					$this->linkWarning("$path => $livePath (" . $this->_('it is in the trash') . ')');
 					continue;
-				} else if(strpos($livePath, $adminPath) !== false) {
+				} else if(strpos($livePath, $adminPath) === 0) {
 					// do not update paths that point in admin
 					$this->linkWarning("$path => $livePath (" . $this->_('points to the admin') . ')');
 					continue;
@@ -784,7 +784,7 @@ class MarkupQA extends Wire {
 				if(file_exists($this->page->filesManager()->path() . basename($src))) {
 					// file exists, but we just don't know what it is - leave it alone
 				} else {
-					$this->error("Image file no longer exists: " . basename($src) . ")");
+					$this->error("Image file no longer exists: $src");
 					if($this->page->of()) $value = str_replace($img, '', $value);
 					$info['img_unresolved']++;
 				}
@@ -912,7 +912,7 @@ class MarkupQA extends Wire {
 	 * 
 	 */
 	public function error($text, $flags = 0) {
-		$logText = "$text (page={$this->page->path}, field={$this->field->name})";
+		$logText = "$text (field={$this->field->name}, id={$this->page->id}, path={$this->page->path})";
 		$this->wire('log')->save(self::errorLogName, $logText);
 		/*
 		if($this->wire('modules')->isInstalled('SystemNotifications')) {

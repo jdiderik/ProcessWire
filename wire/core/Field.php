@@ -19,8 +19,9 @@
  * @property string $name Name of field  #pw-group-properties
  * @property string $table Database table used by the field #pw-group-properties
  * @property string $prevTable Previously database table (if field was renamed) #pw-group-properties
+ * @property string $prevName Previously used name (if field was renamed), 3.0.164+ #pw-group-properties
  * @property Fieldtype|null $type Fieldtype module that represents the type of this field #pw-group-properties
- * @property Fieldtype $prevFieldtype Previous Fieldtype, of type was changed #pw-group-properties
+ * @property Fieldtype|null $prevFieldtype Previous Fieldtype, if type was changed #pw-group-properties
  * @property int $flags Bitmask of flags used by this field #pw-group-properties
  * @property-read string $flagsStr Names of flags used by this field (readonly) #pw-group-properties
  * @property string $label Text string representing the label of the field #pw-group-properties
@@ -35,6 +36,8 @@
  * @property array|null $orderByCols Columns that WireArray values are sorted by (default=null), Example: "sort" or "-created". #pw-internal
  * @property int|null $paginationLimit Used by paginated WireArray values to indicate limit to use during load. #pw-internal
  * @property array $allowContexts Names of settings that are custom configured to be allowed for context. #pw-group-properties
+ * @property bool|int|null $flagUnique Non-empty value indicates request for, or presence of, Field::flagUnique flag. #pw-internal
+ * @property Fieldgroup|null $_contextFieldgroup Fieldgroup field is in context for or null if not in context. #pw-internal
  *
  * Common Inputfield properties that Field objects store:  
  * @property int|bool|null $required Whether or not this field is required during input #pw-group-properties
@@ -56,6 +59,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 	/**
 	 * Field should be automatically joined to the page at page load time
+	 * 
 	 * #pw-group-flags
 	 *
 	 */
@@ -63,6 +67,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 	/**
 	 * Field used by all fieldgroups - all fieldgroups required to contain this field
+	 * 
 	 * #pw-group-flags
 	 *
 	 */
@@ -70,6 +75,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 	/**
 	 * Field is a system field and may not be deleted, have it's name changed, or be converted to non-system
+	 * 
 	 * #pw-group-flags
 	 *
 	 */
@@ -77,6 +83,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 	/**
 	 * Field is permanent in any fieldgroups/templates where it exists - it may not be removed from them
+	 * 
 	 * #pw-group-flags
 	 *
 	 */
@@ -84,6 +91,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 	/**
 	 * Field is access controlled
+	 * 
 	 * #pw-group-flags
 	 *
 	 */
@@ -93,6 +101,7 @@ class Field extends WireData implements Saveable, Exportable {
 	 * If field is access controlled, this flag says that values are still front-end API accessible
 	 * 
 	 * Without this flag, non-viewable values are made blank when output formatting is ON.
+	 * 
 	 * #pw-group-flags
 	 * 
 	 */
@@ -102,13 +111,28 @@ class Field extends WireData implements Saveable, Exportable {
 	 * If field is access controlled and user has no edit access, they can still view in the editor (if they have view permission)
 	 * 
 	 * Without this flag, non-editable values are simply not shown in the editor at all.
+	 * 
 	 * #pw-group-flags
 	 * 
 	 */
-	const flagAccessEditor = 128; 
+	const flagAccessEditor = 128;
+
+	/**
+	 * Field requires that the same value is not repeated more than once in its table 'data' column (when supported by Fieldtype)
+	 * 
+	 * When this flag is set and there is a non-empty $flagUnique property on the field, then it indicates a unique index 
+	 * is currently present. When only this flag is present (no property), it indicates a request to remove the index and flag. 
+	 * When only the property is present (no flag), it indicates a pending request to add unique index and flag. 
+	 * 
+	 * #pw-group-flags
+	 * @since 3.0.150
+	 * 
+	 */
+	const flagUnique = 256;
 
 	/**
 	 * Field has been placed in a runtime state where it is contextual to a specific fieldgroup and is no longer saveable
+	 * 
 	 * #pw-group-flags
 	 *
 	 */
@@ -116,6 +140,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 	/**
 	 * Set this flag to override system/permanent flags if necessary - once set, system/permanent flags can be removed, but not in the same set().
+	 * 
 	 * #pw-group-flags
 	 *
 	 */
@@ -123,6 +148,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 	/**
 	 * Prefix for database tables
+	 * 
 	 * #pw-internal
 	 * 
 	 */
@@ -154,18 +180,26 @@ class Field extends WireData implements Saveable, Exportable {
 	protected $prevTable;
 
 	/**
-	 * A specifically set table name by setTable() for override purposes
+	 * If the field name changed, this is the previous name
 	 * 
 	 * @var string
 	 * 
 	 */
-	protected $setTable = '';
+	protected $prevName = '';
 
 	/**
 	 * If the field type changed, this is the previous fieldtype so that it can be changed at save time
 	 *
 	 */
 	protected $prevFieldtype;
+	
+	/**
+	 * A specifically set table name by setTable() for override purposes
+	 *
+	 * @var string
+	 *
+	 */
+	protected $setTable = '';
 
 	/**
 	 * Accessed properties, becomes array when set to true, null when set to false
@@ -243,6 +277,9 @@ class Field extends WireData implements Saveable, Exportable {
 			return $this->setFieldtype($value);
 		} else if($key == 'prevTable') {
 			$this->prevTable = $value;
+			return $this;
+		} else if($key == 'prevName') {
+			$this->prevName = $value;
 			return $this;
 		} else if($key == 'prevFieldtype') {
 			$this->prevFieldtype = $value;
@@ -364,6 +401,7 @@ class Field extends WireData implements Saveable, Exportable {
 			else if($key == 'editRoles') return $this->editRoles;
 			else if($key == 'table') return $this->getTable();
 			else if($key == 'prevTable') return $this->prevTable;
+			else if($key == 'prevName') return $this->prevName;
 			else if($key == 'prevFieldtype') return $this->prevFieldtype;
 			else if(isset($this->settings[$key])) return $this->settings[$key];
 			else if($key == 'icon') return $this->getIcon(true);
@@ -543,7 +581,7 @@ class Field extends WireData implements Saveable, Exportable {
 		// populate import data
 		foreach($changes as $key => $change) {
 			$this->errors('clear all');
-			$this->set($key, $data[$key]);
+			if(isset($data[$key])) $this->set($key, $data[$key]);
 			if(!empty($data['errors'][$key])) {
 				$error = $data['errors'][$key];
 				// just in case they switched it to an array of multiple errors, convert back to string
@@ -591,7 +629,10 @@ class Field extends WireData implements Saveable, Exportable {
 				throw new WireException("You may not change the name of field '{$this->settings['name']}' because it is a system field.");
 			}
 			$this->trackChange('name');
-			if($this->settings['name']) $this->prevTable = $this->getTable(); // so that Fields can perform a table rename
+			if($this->settings['name']) {
+				$this->prevName = $this->settings['name'];
+				$this->prevTable = $this->getTable(); // so that Fields can perform a table rename
+			}
 		}
 
 		$this->settings['name'] = $name;
@@ -616,7 +657,7 @@ class Field extends WireData implements Saveable, Exportable {
 
 		} else if(is_string($type)) {
 			$typeStr = $type;
-			$fieldtypes = $this->wire('fieldtypes');
+			$fieldtypes = $this->wire('fieldtypes'); /** @var Fieldtypes $fieldtypes */
 			if(!$type = $fieldtypes->get($type)) {
 				$this->error("Fieldtype '$typeStr' does not exist");
 				return $this;
@@ -647,6 +688,59 @@ class Field extends WireData implements Saveable, Exportable {
 	 */
 	public function getFieldtype() {
 		return $this->type; 
+	}
+
+	/**
+	 * Get this field in context of a Page/Template
+	 * 
+	 * #pw-group-retrieval
+	 * 
+	 * @param Page|Template|Fieldgroup|string $for Specify Page, Template, or template name string
+	 * @param string $namespace Optional namespace (internal use)
+	 * @param bool $has Return boolean rather than Field to check if context exists? (default=false)
+	 * @return Field|bool
+	 * @since 3.0.162
+	 * @see Fieldgroup::getFieldContext(), Field::hasContext()
+	 * 
+	 */
+	public function getContext($for, $namespace = '', $has = false) {
+		/** @var Fieldgroup|null $fieldgroup */
+		$fieldgroup = null;
+		if(is_string($for)) {
+			$for = $this->wire()->templates->get($for);
+		}
+		if($for instanceof Page) {
+			/** @var Page $context */
+			$template = $for instanceof NullPage ? null : $for->template;
+			if(!$template) throw new WireException('Page must have template to get context');
+			$fieldgroup = $template->fieldgroup;
+		} else if($for instanceof Template) {
+			/** @var Template $context */
+			$fieldgroup = $for->fieldgroup;
+		} else if($for instanceof Fieldgroup) {
+			$fieldgroup = $for;
+		}
+		if(!$fieldgroup) throw new WireException('Cannot get Fieldgroup for field context'); 
+		
+		if($has) return $fieldgroup->hasFieldContext($this->id, $namespace);
+
+		return $fieldgroup->getFieldContext($this->id, $namespace);
+	}
+
+	/**
+	 * Does this field have context settings for given Page/Template?
+	 *
+	 * #pw-group-retrieval
+	 *
+	 * @param Page|Template|Fieldgroup|string $for Specify Page, Template, or template name string
+	 * @param string $namespace Optional namespace (internal use)
+	 * @return Field|bool
+	 * @since 3.0.163
+	 * @see Field::getContext()
+	 *
+	 */
+	public function hasContext($for, $namespace = '') {
+		return $this->getContext($for, $namespace, true);
 	}
 
 	/**
@@ -1371,6 +1465,26 @@ class Field extends WireData implements Saveable, Exportable {
 	}
 
 	/**
+	 * Get URL to edit field in the admin
+	 * 
+	 * @param array|bool|string $options Specify array of options, string for find option, or bool for http option.
+	 *  - `find` (string): Name of field to find in editor form 
+	 *  - `http` (bool): True to force inclusion of scheme and hostname
+	 * @return string
+	 * @since 3.0.151
+	 * 
+	 */
+	public function editUrl($options = array()) {
+		if(is_string($options)) $options = array('find' => $options);
+		if(is_bool($options)) $options = array('http' => $options);
+		if(!is_array($options)) $options = array();
+		$url = $this->wire('config')->urls(empty($options['http']) ? 'admin' : 'httpAdmin');
+		$url .= "setup/field/edit?id=$this->id";
+		if(!empty($options['find'])) $url .= '#find-' . $this->wire('sanitizer')->fieldName($options['find']);
+		return $url;
+	}
+
+	/**
 	 * debugInfo PHP 5.6+ magic method
 	 *
 	 * This is used when you print_r() an object instance.
@@ -1383,6 +1497,7 @@ class Field extends WireData implements Saveable, Exportable {
 		$info['flags'] = $info['flags'] ? "$this->flagsStr ($info[flags])" : "";
 		$info = array_merge($info, parent::__debugInfo());
 		if($this->prevTable) $info['prevTable'] = $this->prevTable;
+		if($this->prevName) $info['prevName'] = $this->prevName;
 		if($this->prevFieldtype) $info['prevFieldtype'] = (string) $this->prevFieldtype;
 		if(!empty($this->trackGets)) $info['trackGets'] = $this->trackGets;
 		if($this->useRoles) {

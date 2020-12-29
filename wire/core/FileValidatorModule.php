@@ -10,7 +10,7 @@
  * 3. Copy the getModuleInfo() method out of this class and update as appropriate.
  * 4. Implement an isValidFile($filename) method, and you are done. 
  * 
- * EXAMPLE: /site/modules/FileValidatorSVG.module
+ * EXAMPLE: /site/modules/FileValidatorHTML.module
  * 
  * class FileValidatorHTML extends FileValidatorModule {
  *     public static function getModuleInfo() {
@@ -94,7 +94,7 @@ abstract class FileValidatorModule extends WireData implements Module {
 	protected $_pagefile = null;
 
 	/**
-	 * Is the given file valid? (this is the method mdoules should implement)
+	 * Is the given file valid? (this is the method modules should implement)
 	 * 
 	 * This method should return:
 	 * 	- boolean TRUE if file is valid
@@ -118,7 +118,7 @@ abstract class FileValidatorModule extends WireData implements Module {
 	 * FileValidator modules should not implement this method, as it only serves as a front-end to isValid()
 	 * for logging purposes. 
 	 * 
-	 * @param $filename
+	 * @param string $filename
 	 * @return bool|int Returns TRUE if valid, FALSE if not, or integer 1 if valid as a result of sanitization.
 	 * 
 	 */

@@ -186,7 +186,7 @@ class ProcessPageList extends Process implements ConfigurableModule {
 		if($this->openPage->id && $this->speed > 50) $this->speed = floor($this->speed / 2);
 		$this->page = $pages->get("id=" . ($this->id > 0 ? $this->id : 1) . ", status<" . Page::statusMax); 
 
-		if(!$this->page) throw new Wire404Exception("Unable to load page {$this->id}"); 
+		if(!$this->page) throw new Wire404Exception("Unable to load page {$this->id}", Wire404Exception::codeSecondary); 
 		if(!$this->page->listable()) throw new WirePermissionException("You don't have access to list page {$this->page->url}"); 
 		$this->page->setOutputFormatting(false);
 
@@ -644,6 +644,34 @@ class ProcessPageList extends Process implements ConfigurableModule {
 	public function ___executeBookmarks() {
 		$bookmarks = $this->getPageBookmarks();
 		return $bookmarks->editBookmarks();
+	}
+	
+	/**
+	 * URL to redirect to after non-authenticated user is logged-in, or false if module does not support
+	 *
+	 * @param Page $page
+	 * @return bool|string
+	 * @sine 3.0.167
+	 *
+	 */
+	public static function getAfterLoginUrl(Page $page) {
+		$url = $page->url();
+		$input = $page->wire()->input;
+		list($s1, $s2) = array($input->urlSegment1, $input->urlSegment2); 
+		if(ctype_digit($s2) && ($s1 === 'id' || $s1 === 'open')) {
+			return $url . "$s1/" . (int) $s2; // i.e. /id/123 or /open/456
+		} else {
+			$intVars = array('limit', 'start', 'lang', 'open', 'id', 'n');
+			$data = array();
+			foreach($intVars as $name) {
+				$value = (int) $input->get($name);
+				if($value > 0) $data[$name] = $value;
+			}
+			$render = $input->get->name('render');
+			if($render) $data['render'] = strtoupper($render);
+			if(count($data)) $url .= "?" . implode('&', $data); 
+		}
+		return $url;
 	}
 
 	/**
