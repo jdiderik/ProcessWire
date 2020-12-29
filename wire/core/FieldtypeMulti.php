@@ -478,16 +478,10 @@ abstract class FieldtypeMulti extends Fieldtype {
 			$query->data('_table', $table);
 			
 			foreach($filters as $selector) {
-				
-				$col = $selector->field;
+				// @todo add support for OR values of $col or $value
+				$col = $sanitizer->fieldName($selector->field);
 				$op = $selector->operator;
 				$value = $selector->value;
-			
-				if(is_array($col)) {
-					foreach($col as $k => $v) $col[$k] = $sanitizer->fieldName($v);
-				} else {
-					$col = $sanitizer->fieldName($col);
-				}
 				
 				if($col === 'sort') {
 					$desc = strpos($value, '-') === 0 ? '-' : '';
@@ -871,7 +865,7 @@ abstract class FieldtypeMulti extends Fieldtype {
 	 * @param string $subfield Name of the field (typically 'data', unless selector explicitly specified another)
 	 * @param string $operator The comparison operator
 	 * @param mixed $value The value to find
-	 * @return PageFinderDatabaseQuerySelect|DatabaseQuerySelect $query
+	 * @return DatabaseQuery $query
 	 *
 	 */
 	public function getMatchQuery($query, $table, $subfield, $operator, $value) {

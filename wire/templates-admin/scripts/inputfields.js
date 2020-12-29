@@ -993,21 +993,15 @@ function InputfieldDependencies($target) {
 
 			var _conditionValue = new String(condition.values[i]); // original
 			var conditionValue = trimValue(_conditionValue.replace(/\s/g, '_')); // spaces converted to "_"
-			var fieldID = "#Inputfield_" + conditionField + "_" + conditionValue; // i.e. "Inputfield_mycheckbox_1"
-			
+			consoleLog('conditionValue: ' + conditionValue);
+			var fieldID = "#Inputfield_" + conditionField + "_" + conditionValue;
 			$field = $(fieldID);
-			if(!$field.length) {
-				fieldID = '#' + conditionField + "_" + conditionValue; // i.e. "mycheckbox_1" (alternate)
-				$field = $(fieldID);
-			}
-
-			consoleLog('Required condition value: ' + conditionValue);
+			var inputType = $field.attr('type');
 
 			if($field.length) {
-				// found a matching checkbox/radio field
-				var inputType = $field.attr('type');
-				var val = '';
 				consoleLog("Found " + inputType + " via value " + fieldID);
+				// found a matching checkbox/radio field
+				var val = '';
 				if($field.is(":checked")) {
 					// checkbox or radio IS checked
 					val = $field.val();
@@ -1376,29 +1370,22 @@ function InputfieldDependencies($target) {
 			// attach change event handler to all applicable fields
 			for(var fn = 0; fn < fields.length; fn++) {
 				
-				fieldAndSubfield = extractFieldAndSubfield(fields[fn]); 
+				var fieldAndSubfield = extractFieldAndSubfield(fields[fn]); 
 				var f = fieldAndSubfield.field;
 
 				// locate the dependency inputfield
 				var $inputfield = $("#Inputfield_" + f);
-				if($inputfield.length == 0) {
+				if ($inputfield.length == 0) {
 					consoleLog("Unable to find inputfield by: #Inputfield_" + f); 
 					$inputfield = $("#" + f);
 					if($inputfield.length == 0) consoleLog("Unable to find inputfield by: #" + f); 
 				}
 
 				// if the dependency inputfield isn't found, locate its wrapper..
-				if($inputfield.length == 0) {
+				if ($inputfield.length == 0) {
 					// use any inputs within the wrapper
 					$inputfield = $("#wrap_Inputfield_" + f).find(":input");
 					if($inputfield.length == 0) consoleLog("Unable to find inputfield by: #wrap_Inputfield_" + f + " :input");
-				}
-				
-				// if the dependency inputfield isn't found, locate its wrapper..
-				if($inputfield.length == 0) {
-					// use any inputs within the wrapper
-					$inputfield = $("#wrap_" + f).find(":input");
-					if($inputfield.length == 0) consoleLog("Unable to find inputfield by: #wrap_" + f + " :input");
 				}
 
 				// attach change event to dependency inputfield
@@ -1914,13 +1901,10 @@ function InputfieldStates($target) {
 		var config = ProcessWire.config;
 	} 
 	if(typeof config !== "undefined" && config.debug) {
-		$('.InputfieldHeader > i.toggle-icon', $target).hover(function() {
+		$('label.InputfieldHeader > i.toggle-icon', $target).hover(function() {
 			var $label = $(this).parent('label');
 			if($label.length == 0) return;
-			var forId = $label.attr('for');
-			if(!forId) forId = $label.parent().attr('id');
-			if(!forId) return;
-			var text = forId.replace(/^Inputfield_|wrap_Inputfield_|wrap_/, '');
+			var text = $label.attr('for').replace(/^Inputfield_/, '');
 			if(text.length) {
 				var $tip = $("<small class='InputfieldNameTip ui-priority-secondary'>&nbsp;" + text + "&nbsp;</small>");
 				$tip.css('float', 'right');

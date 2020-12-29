@@ -138,9 +138,7 @@ class Languages extends PagesType {
 	 * 
 	 */
 	public function getPageClass() {
-		if($this->pageClass) return $this->pageClass;
-		$this->pageClass = class_exists(__NAMESPACE__ . "\\LanguagePage") ? 'LanguagePage' : 'Language';
-		return $this->pageClass;
+		return 'Language';
 	}
 
 	/**

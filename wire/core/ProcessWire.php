@@ -24,7 +24,6 @@ require_once(__DIR__ . '/boot.php');
  * ======================
  * @property AdminTheme|AdminThemeFramework|null $adminTheme
  * @property WireCache $cache
- * @property WireClassLoader $classLoader
  * @property Config $config
  * @property WireDatabasePDO $database
  * @property WireDateTime $datetime
@@ -53,7 +52,6 @@ require_once(__DIR__ . '/boot.php');
  * @property User $user
  * @property Users $users
  * @property ProcessWire $wire
- * @property WireShutdown $shutdown
  * 
  * @method init()
  * @method ready()
@@ -79,7 +77,7 @@ class ProcessWire extends Wire {
 	 * Reversion revision number
 	 * 
 	 */
-	const versionRevision = 169;
+	const versionRevision = 165;
 
 	/**
 	 * Version suffix string (when applicable)

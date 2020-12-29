@@ -463,10 +463,6 @@ class WireTextTools extends Wire {
 	 *
 	 */
 	function truncate($str, $maxLength, $options = array()) {
-		
-		if(!strlen($str)) return '';
-
-		$ent = __(true, 'entityEncode', false);
 
 		$defaults = array(
 			'type' => 'word', // word, punctuation, sentence, or block
@@ -484,8 +480,8 @@ class WireTextTools extends Wire {
 			'noEndSentence' => $this->_('Mr. Mrs. Ms. Dr. Hon. PhD. i.e. e.g.'), // When in sentence type, words that do not end the sentence (space-separated)
 		);
 
-		if($ent) __(true, 'entityEncode', $ent);
-		
+		if(!strlen($str)) return '';
+
 		if(is_string($options) && ctype_alpha($options)) {
 			$defaults['type'] = $options;
 			$options = array();
@@ -595,7 +591,7 @@ class WireTextTools extends Wire {
 				$pos = array_pop($tests);
 				$result = trim($this->substr($str, 0, $pos + 1));
 				$lastChar = $this->substr($result, -1);
-				$result = $this->rtrim($result, $options['trim']);
+				$result = rtrim($result, $options['trim']);
 
 				if($type === 'sentence' || $type === 'block') {
 					// good to go with result as is
@@ -608,7 +604,7 @@ class WireTextTools extends Wire {
 						if(in_array($c, $endSentenceChars)) continue;
 						$trims .= $c;
 					}
-					$result = $this->rtrim($result, $trims) . $options['more'];
+					$result = rtrim($result, $trims) . $options['more'];
 				} else {
 					$result .= $options['more'];
 				}
@@ -621,7 +617,7 @@ class WireTextTools extends Wire {
 			}
 		} else {
 			// if we didn't find any place to truncate, just return exact truncated string
-			$result = $this->trim($str, $options['trim']) . $options['more'];
+			$result = trim($str, $options['trim']) . $options['more'];
 		}
 		
 		if(strlen($options['more'])) {
@@ -715,13 +711,11 @@ class WireTextTools extends Wire {
 	 * 
 	 */
 	public function getPunctuationChars($sentence = false) {
-		$ent = __(true, 'entityEncode', false);
 		if($sentence) {
 			$s = $this->_('. ? !'); // Sentence ending punctuation characters (must be space-separated)
 		} else {
 			$s = $this->_(', : . ? ! “ ” „ " – -- ( ) [ ] { } « »'); // All punctuation characters (must be space-separated)
 		}
-		if($ent) __(true, 'entityEncode', $ent);
 		return explode(' ', $s); 
 	}
 
@@ -1398,39 +1392,7 @@ class WireTextTools extends Wire {
 	 */
 	public function trim($str, $chars = '') {
 		if(!$this->mb) return $chars === '' ? trim($str) : trim($str, $chars);
-		return $this->wire()->sanitizer->trim($str, $chars);
-	}
-
-	/**
-	 * Strip whitespace (or other characters) from the beginning of string only (aka left trim)
-	 *
-	 * #pw-group-PHP-function-alternates
-	 *
-	 * @param string $str
-	 * @param string $chars Omit for default
-	 * @return string
-	 * @since 3.0.168
-	 *
-	 */
-	public function ltrim($str, $chars = '') {
-		if(!$this->mb) return $chars === '' ? ltrim($str) : ltrim($str, $chars);
-		return $this->wire()->sanitizer->trim($str, $chars, 'ltrim');
-	}
-	
-	/**
-	 * Strip whitespace (or other characters) from the end of string only (aka right trim)
-	 *
-	 * #pw-group-PHP-function-alternates
-	 *
-	 * @param string $str
-	 * @param string $chars Omit for default
-	 * @return string
-	 * @since 3.0.168
-	 *
-	 */
-	public function rtrim($str, $chars = '') {
-		if(!$this->mb) return $chars === '' ? rtrim($str) : rtrim($str, $chars);
-		return $this->wire()->sanitizer->trim($str, $chars, 'rtrim');
+		return $this->wire('sanitizer')->trim($str, $chars);
 	}
 	
 
