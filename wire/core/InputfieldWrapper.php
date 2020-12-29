@@ -57,7 +57,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 		'item_toggle' => "<i class='toggle-icon fa fa-fw fa-angle-down' data-to='fa-angle-down fa-angle-right'></i>", 
 		// ALSO: 
 		// InputfieldAnything => array( any of the properties above to override on a per-Inputifeld basis)
-	);
+		);
 
 	static protected $markup = array();
 
@@ -81,17 +81,15 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 		'item_required_if' => 'InputfieldStateRequiredIf'
 		// ALSO: 
 		// InputfieldAnything => array( any of the properties above to override on a per-Inputifeld basis)
-	);
+		);
 
 	static protected $classes = array();
 
 	/**
 	 * Instance of InputfieldsArray, if this Inputfield contains child Inputfields
 	 *
-	 * @var InputfieldsArray
-	 * 
 	 */
-	protected $children;
+	protected $children = null;
 
 	/**
 	 * Array of Inputfields that had their processing delayed by dependencies. 
@@ -181,7 +179,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 		if(self::debugPropertyAccess) throw new WireException("Access of attribute or setting: $key");
 		$value = $this->wire($key);
 		if($value) return $value; 
-		if($key === 'children') return $this->children(); 
+		if($key == 'children') return $this->children; 
 		if(($value = parent::get($key)) !== null) return $value; 
 		return null;
 	}
@@ -196,7 +194,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function __get($key) {
-		if($key === 'children') return $this->children();
+		if($key == 'children') return $this->children;
 		$value = parent::get($key); 
 		if(is_null($value)) $value = $this->getChildByName($key);
 		return $value; 
@@ -221,7 +219,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 		} else if(is_array($item)) {
 			$this->importArray($item); 
 		} else {
-			$this->children()->add($item); 
+			$this->children->add($item); 
 			$item->setParent($this); 
 		}
 		return $this; 
@@ -328,7 +326,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 */
 	public function prepend(Inputfield $item) {
 		$item->setParent($this); 
-		$this->children()->prepend($item); 
+		$this->children->prepend($item); 
 		return $this; 
 	}
 
@@ -343,7 +341,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 */
 	public function append(Inputfield $item) {
 		$item->setParent($this); 
-		$this->children()->append($item); 
+		$this->children->append($item); 
 		return $this; 
 	}
 
@@ -358,9 +356,9 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function insertBefore(Inputfield $item, Inputfield $existingItem) {
-		if($this->children()->has($existingItem)) {
+		if($this->children->has($existingItem)) {
 			$item->setParent($this);
-			$this->children()->insertBefore($item, $existingItem);
+			$this->children->insertBefore($item, $existingItem);
 		} else if($this->getChildByName($existingItem->attr('name')) && $existingItem->parent) {
 			$existingItem->parent->insertBefore($item, $existingItem);
 		}
@@ -378,9 +376,9 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function insertAfter(Inputfield $item, Inputfield $existingItem) {
-		if($this->children()->has($existingItem)) {
+		if($this->children->has($existingItem)) {
 			$item->setParent($this);
-			$this->children()->insertAfter($item, $existingItem);
+			$this->children->insertAfter($item, $existingItem);
 		} else if($this->getChildByName($existingItem->attr('name')) && $existingItem->parent) {
 			$existingItem->parent->insertAfter($item, $existingItem);
 		}
@@ -403,8 +401,8 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 			$item = $this->getChildByName($item);	
 			if(!$item) return $this;
 		}
-		if($this->children()->has($item)) {
-			$this->children()->remove($item);
+		if($this->children->has($item)) {
+			$this->children->remove($item);
 		} if($this->getChildByName($item->attr('name')) && $item->parent) {
 			$item->parent->remove($item);
 		}
@@ -417,12 +415,12 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 */
 	protected function preRenderChildren() {
 
-		if($this->getSetting('InputfieldWrapper_isPreRendered')) return $this->children(); 
+		if($this->getSetting('InputfieldWrapper_isPreRendered')) return $this->children; 
 
 		$children = $this->wire(new InputfieldWrapper()); 
 		$wrappers = array($children);
 
-		foreach($this->children() as $inputfield) {
+		foreach($this->children as $inputfield) {
 
 			$wrapper = end($wrappers); 
 
@@ -818,7 +816,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 * 
 	 */
 	public function ___renderValue() {
-		if(!count($this->children())) return '';
+		if(!count($this->children)) return '';
 		$this->addClass('InputfieldRenderValueMode');
 		$this->set('renderValueMode', true); 
 		$out = $this->render(); 
@@ -974,7 +972,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	
 		if(!$this->children) return $this; 
 
-		foreach($this->children() as $key => $child) {
+		foreach($this->children as $key => $child) {
 			/** @var Inputfield $child */
 
 			// skip over the field if it is not processable
@@ -1071,7 +1069,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 */
 	public function isEmpty() {
 		$empty = true; 
-		foreach($this->children() as $child) {
+		foreach($this->children as $child) {
 			if(!$child->isEmpty()) {
 				$empty = false;
 				break;
@@ -1094,7 +1092,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	public function getEmpty($required = true) {
 		$a = array();
 		static $n = 0;
-		foreach($this->children() as $child) {
+		foreach($this->children as $child) {
 			if($child instanceof InputfieldWrapper) {
 				$a = array_merge($a, $child->getEmpty($required));
 			} else {
@@ -1122,7 +1120,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 */
 	public function getErrors($clear = false) {
 		$errors = parent::getErrors($clear); 
-		foreach($this->children() as $key => $child) {
+		foreach($this->children as $key => $child) {
 			foreach($child->getErrors($clear) as $e) {
 				$label = $child->getSetting('label');
 				$msg = $label ? $label : $child->attr('name'); 
@@ -1166,23 +1164,22 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 */
 	public function child($name = '', $recursive = true) {
 		$child = null;
-		$children = $this->children();
 
-		if(!$children->count()) {
+		if(!$this->children->count()) {
 			// no child possible
 
 		} else if(empty($name)) {
 			// first child
-			$child = $children->first();
+			$child = $this->children->first();
 			
 		} else if(is_int($name)) {
 			// number index
-			$child = $children->eq($name);
+			$child = $this->children->eq($name);
 			
 		} else if($this->wire('sanitizer')->name($name) === $name) {
 			// child by name
 			$wrappers = array();
-			foreach($children as $f) {
+			foreach($this->children as $f) {
 				if($f->getAttribute('name') === $name) {
 					$child = $f;
 					break;
@@ -1199,7 +1196,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 
 		} else if(Selectors::stringHasSelector($name)) {
 			// first child matching selector string
-			$child = $children->find("$name, limit=1")->first();
+			$child = $this->children("$name, limit=1")->first();
 		}
 		
 		return $child;
@@ -1231,7 +1228,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 */
 	public function _getDelayedChildren($clear = false) {
 		$a = $this->delayedChildren; 
-		foreach($this->children() as $child) {
+		foreach($this->children as $child) {
 			if(!$child instanceof InputfieldWrapper) continue; 
 			$a = array_merge($a, $child->_getDelayedChildren($clear)); 
 		}
@@ -1249,7 +1246,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function find($selector) {
-		return $this->children()->find($selector); 
+		return $this->children->find($selector); 
 	}
 
 	/**
@@ -1269,7 +1266,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	public function getChildByName($name) {
 		if(!strlen($name)) return null;
 		$inputfield = null;
-		foreach($this->children() as $child) {
+		foreach($this->children as $child) {
 			if($child->getAttribute('name') === $name) {
 				$inputfield = $child;
 			} else if($child instanceof InputfieldWrapper) {
@@ -1291,7 +1288,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function getIterator() {
-		return $this->children(); 
+		return $this->children; 
 	}
 
 	/**
@@ -1303,7 +1300,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function count() {
-		return count($this->children());
+		return count($this->children);
 	}
 
 	/**
@@ -1313,17 +1310,14 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 * 
 	 * #pw-group-retrieval-and-traversal
  	 *  
-	 * @param array $options Options to modify behavior (3.0.169+)
-	 *  - `withWrappers` (bool): Also include InputfieldWrapper objects? (default=false) 3.0.169+
 	 * @return InputfieldWrapper
 	 *
 	 */
-	public function getAll(array $options = array()) {
+	public function getAll() {
 		$all = $this->wire(new InputfieldsArray());
-		foreach($this->children() as $child) {
+		foreach($this->children as $child) {
 			if($child instanceof InputfieldWrapper) {
-				if(!empty($options['withWrappers'])) $all->add($child);
-				foreach($child->getAll($options) as $c) {
+				foreach($child->getAll() as $c) {
 					$all->add($c); 
 				}
 			} else {
@@ -1343,8 +1337,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function setTrackChanges($trackChanges = true) {
-		$children = $this->children();
-		if(count($children)) foreach($children as $child) $child->setTrackChanges($trackChanges); 
+		if(count($this->children)) foreach($this->children as $child) $child->setTrackChanges($trackChanges); 
 		return parent::setTrackChanges($trackChanges); 
 	}
 
@@ -1358,8 +1351,7 @@ class InputfieldWrapper extends Inputfield implements \Countable, \IteratorAggre
 	 *
 	 */
 	public function resetTrackChanges($trackChanges = true) {
-		$children = $this->children();
-		if(count($children)) foreach($children as $child) $child->resetTrackChanges($trackChanges); 
+		if(count($this->children)) foreach($this->children as $child) $child->resetTrackChanges($trackChanges); 
 		return parent::resetTrackChanges($trackChanges);
 	}
 
